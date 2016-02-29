@@ -39,9 +39,10 @@ from decimal import Decimal
 import math
 #
 from dateutil import parser
-from LatLon import lat_lon, LatLon, Latitude, Longitude
+from LatLon import lat_lon
 from libraries import sidereal
 import pytz
+from __builtin__ import None
 
 
 ### Constants ###
@@ -53,8 +54,11 @@ def d(val, *args, **kwargs):
     """
     Casts the value into a true decimal
     """
-    val_str = unicode(val)
-    val_d = Decimal(val_str, *args, **kwargs)
+    if not isinstance(val, Decimal):
+        val_str = unicode(val)
+        val_d = Decimal(val_str, *args, **kwargs)
+    else:
+        val_d = val
     return val_d
 
 
@@ -133,6 +137,49 @@ def rad_to_deg(radians):
     degrees = degrees % (Decimal("360"))
     return degrees
 
+def coord_rotate_rad(x, y, z):
+    """Used to convert between equatorial and horizon py.
+        
+        Adapted from http://www.nmt.edu/tcc/help/lang/python/examples/sidereal/ims/
+        
+        For Converting Az,Alt > RA,Dec:
+            x = Altitude in radians (-pi to pi)
+            y = Latitude in radians (-pi to pi)
+            z = Azimuth in radians (0 to 2pi)
+            
+            > xt = Declination in radians
+            > yt = HourAngle in radians
+            
+        For Converting RA,Dec > Az,Alt:
+            x = Declination in radians (-pi to pi)
+            y = Latitude in radians (-pi to pi)
+            z = HourAngle in radians (0 to 2pi), (which requires longitude if converting from RA)
+            
+            > xt = Altitude in radians
+            > yt = Azimuth in radians
+        
+      [ x, y, and z are angles in radians ->
+          return (xt, yt) where
+          xt=arcsin(sin(x)*sin(y)+cos(x)*cos(y)*cos(z)) and
+          yt=arccos((sin(x)-sin(y)*sin(xt))/(cos(y)*cos(xt))) ]
+    """
+    #-- 1 --
+    xt  =  math.asin ( math.sin(x) * math.sin(y) +
+                  math.cos(x) * math.cos(y) * math.cos(z) )
+    #-- 2 --
+    yt  =  math.acos ( ( math.sin(x) - math.sin(y) * math.sin(xt) ) /
+                  ( math.cos(y) * math.cos(xt) ) )
+    #-- 3 --
+    if  math.sin(z) > 0.0:
+        yt  =  TWO_PI - yt
+
+    #-- 4 --
+    return (xt, yt)
+    
+
+################### Classes #########################
+
+#### Single points
 
 class BaseCoordinate(lat_lon.GeoCoord, object):
     """
@@ -149,11 +196,16 @@ class BaseCoordinate(lat_lon.GeoCoord, object):
     
     base_mode = "dms" #Whether to assume this coordinate operates in degrees / hours or radians
     mutable_mode = True #Whether we can piss about with the mode and change it once initialised
+    str_prefix = None
+    range_high = 360
+    range_low = 0
+    range_rotates = True #True = The range flicks from high back to low if you increase. False = Range oscillates  
     #
     def __init__(self, big=Decimal("0"), medium=Decimal("0"), small=Decimal("0"), mode=None):
         """
             Sets up this object based upon its format.
             
+            @TODO: handle a range of string inputs!
             @TODO: handle degrees in range 180-360 as negative degrees (-180-0)
         """
         #Defaults
@@ -162,6 +214,19 @@ class BaseCoordinate(lat_lon.GeoCoord, object):
                 self.base_mode = mode
         else:
             mode = self.base_mode
+        #Parsing input
+        if isinstance(big,(tuple,list)):
+            val_tup = big
+            try:
+                big = val_tup[0]
+            except IndexError: #Big number mandatory!
+                raise TypeError("You passed in an empty list or tuple to %s. Need at least one value!" % self.__class__.__name__)
+            try:
+                medium = val_tup[1]
+                small = val_tup[2]
+            except IndexError:
+                pass #These smaller entities are not mandatory!
+        #Setting to decimal
         big = Decimal(unicode(big))
         medium = Decimal(unicode(medium))
         small = Decimal(unicode(small))
@@ -180,6 +245,28 @@ class BaseCoordinate(lat_lon.GeoCoord, object):
             degrees = Decimal(math.degrees(big)) % Decimal("360")
         #Now we can pass this into super
         super(BaseCoordinate, self).__init__(degrees, minutes, seconds)
+    #
+    def normalised(self, val=None, as_float=False):
+        """
+        Returns the specified value to fit the prescribed ranges and range rules
+        """
+        if val is None:
+            val = self.decimal_degree
+        val = d(val) #Cast to Decimal
+        range_high = d(self.range_high)
+        range_low = d(self.range_low)
+        if self.range_rotates:
+            #Cycles through the range
+            n_val = (val + range_high)%(range_high - range_low) + range_low
+        else:
+            #Oscillates between range extremes:
+            range_range = range_high - range_low
+            n_passes, residual = divmod((val - range_low),range_range)
+            if n_passes % 2: #If odd, subtract residual off the high
+                n_val = range_high - residual
+            else: #If even, add it to the low
+                n_val = range_low + residual
+        return n_val                 
     #
     @property
     def hd(self):
@@ -235,6 +322,8 @@ class BaseCoordinate(lat_lon.GeoCoord, object):
             out = u"{0} {1} {2:.5f}{hemisphere}".format(self.degree, self.minute, self.second, hemisphere=self.get_hemisphere())
         else:
             out = self._signed_unicode(u"{0} {1} {2:.5f}{hemisphere}", self.degree, self.minute, self.second, hemisphere=self.get_hemisphere())
+        if self.str_prefix:
+            out = u"{0} {1}".format(unicode(self.str_prefix), out)
         return out
     #
     @property
@@ -303,16 +392,20 @@ class BaseCoordinate(lat_lon.GeoCoord, object):
         mode = self.base_mode
         if mode == "hms": #Hours, minutes, seconds supplied
             hours, minutes, seconds = self.hms
-            return u"{0}h {1}m {2:.5f}s".format(hours,minutes,seconds)
+            out = u"{0}h {1}m {2:.5f}s".format(hours,minutes,seconds)
         elif mode == "hd": #Hours as decimal:
-            return u"{0}h".format(self.hd)
+            out = u"{0}h".format(self.hd)
         elif mode == "rad": #Radians
-            return u"{0} radians".format(self.rad)
+            out = u"{0} radians".format(self.rad)
         elif mode == "dms": #Degrees min secs
-            return u"{0}° {1}' {2:.5f}\"".format(*self.dms)
+            out = u"{0}° {1}' {2:.5f}\"".format(*self.dms)
         elif mode == "dd": #Decimal degrees
-            return u"{0}°".format(self.dd)
-        return unicode(self.decimal_degree)
+            out = u"{0}°".format(self.dd)
+        else:
+            out = unicode(self.decimal_degree)
+        if self.str_prefix:
+            out = u"{0} {1}".format(unicode(self.str_prefix), out)
+        return out
     #
     def __str__(self):
         """
@@ -337,6 +430,15 @@ class SmartLat(BaseCoordinate):
     """
     base_mode = "dms"
     mutable_mode = False
+    str_prefix = "Lat"
+    range_high = 90
+    range_low = -90
+    range_rotates = False #True = The range flicks from high back to low if you increase. False = Range oscillates
+    
+    def range90(self):
+        """
+        Reports the latitude in range -90 to +90
+        """
     
     def get_hemisphere(self):
         '''
@@ -377,6 +479,7 @@ class SmartLon(BaseCoordinate):
     """
     base_mode = "dms"
     mutable_mode = False
+    str_prefix = "Lon"
 
     def __init__(self, degree = 0, minute = 0, second = 0):
         super(SmartLon, self).__init__(degree, minute, second) # Initialize the GeoCoord
@@ -389,7 +492,6 @@ class SmartLon(BaseCoordinate):
         Report longitudes using the range -180 to 180.
         '''
         return ((self.decimal_degree + 180)%360) - 180
-        
         
     def range360(self):
         '''
@@ -440,6 +542,10 @@ class HourAngle(BaseCoordinate):
     """
     base_mode = "hms"
     mutable_mode = False
+    str_prefix = "HrA"
+    range_high = 24
+    range_low = 0
+    range_rotates = True #True = The range flicks from high back to low if you increase. False = Range oscillates
     #
     def right_ascension(self, longitude, timestamp=None):
         """
@@ -481,10 +587,17 @@ class HourAngle(BaseCoordinate):
 
 class RightAscension(BaseCoordinate):
     """
-    Represents the Right Ascension location of an object on the celestial sphere 
+    Represents the Right Ascension location of an object on the celestial sphere
+    
+        0,24      Vernal Equinox
+        12     Opposite Vernal Equinox
     """ 
     base_mode = "hms"
     mutable_mode = False
+    str_prefix = "RA"
+    range_high = 24
+    range_low = 0
+    range_rotates = True #True = The range flicks from high back to low if you increase. False = Range oscillates
     #
     def hour_angle(self, longitude, timestamp=None):
         """
@@ -524,18 +637,167 @@ class RightAscension(BaseCoordinate):
         return self
 
 
-class Declination(BaseCoordinate):
+class Declination(SmartLat):
     """
-    ##HERE##
+    Represents the Declination (N+ S- direction) which applies to both the celestial grid and equatorial scopes (they are aligned!!)
+    
+        [Also almost perfectly aligned to Latitude, but see: https://en.wikipedia.org/wiki/Declination#Relation_to_latitude
+         since the two are separate concepts we will use two separate classes]
+         
+        +90    Celestial North pole
+        0      Celestial equator
+        -90    Celestial South pole
+        
     """
+    base_mode = "dms"
+    mutable_mode = False
+    str_prefix = "Dec"
+    range_high = 90
+    range_low = -90
+    range_rotates = False #True = The range flicks from high back to low if you increase. False = Range oscillates
+    
+
+class Altitude(BaseCoordinate):
+    """
+    Represents the Altitude angle of an AltAz scope. +90 deg is the Zeneth, and -90 deg is the floor and utterly pointless to point to.
+    Remember, the horizon is slightly below 0 deg for flat earth as the earth is curved and telescopes have some height
+    
+        +90    Zeneth
+        0      Geometrical Horizon
+        -90    Nadir
+    """
+    base_mode = "dms"
+    mutable_mode = False
+    str_prefix = "Alt"
+    range_high = 90
+    range_low = -90
+    range_rotates = False #True = The range flicks from high back to low if you increase. False = Range oscillates
+    
+    #You cannot convert from Altitude alone to Declination because it could be any of a range of values depending on the Azimuth!
+    
+
+class Azimuth(BaseCoordinate):
+    """
+    Represents the Azimuth angle of an AltAz scope. Range 0 to 360,  
+    
+        0,360  North
+        180    South
+    """
+    base_mode = "dms"
+    mutable_mode = False
+    str_prefix = "Alt"
+    range_high = 360
+    range_low = 0
+    range_rotates = True #True = The range flicks from high back to low if you increase. False = Range oscillates
 
 
 
+#### Pair of coordinates
+
+class BasePair(object):
+    """
+        Abstract class representing a point on a 2D grid defined by a pair of coordinates
+    """
+    X = None #This is my "x" coordinate of the pair
+    Y = None
+    X_name = "x" #Alternative name which can be used when fetching the coordinate
+    Y_name = "y" #Alternative name which can be used when fetching the coordinate
+    X_abbr = "x" #Alternative name which can be used when fetching the coordinate
+    Y_abbr = "y" #Alternative name which can be used when fetching the coordinate
+    X_class = BaseCoordinate
+    Y_class = BaseCoordinate
+    xyinverted = False #If x and y are inverted on initalisation
+    name = u'' #An identifier
+    #
+    def __init__(self, a=None, b=None, name=None):
+        """
+            Sets up my coordinates
+        """
+        if not self.xyinverted:
+            x = a
+            y = b
+        else: #This is an inverted class!
+            x = b
+            y = a
+        #
+        #Set the name if supplied:
+        if name is not None:
+            self.name = unicode(name)
+        #
+        #Check that x and y are suitable classes
+        if not isinstance(x, BaseCoordinate): #X isn't
+            try: #Inflate the X object up into the correct class
+                x = self.X_class(x)
+            except TypeError as e:
+                raise TypeError("The value for X you passed into <{my_class}> was not coercible into a <{other_class}> type coordinate".format(my_class=self.__class__.__name__, self.X_class.__name__))
+        if not isinstance(y, BaseCoordinate): #Y isn't
+            try: #Inflate the Y object up into the correct class
+                y = self.Y_class(y)
+            except TypeError as e:
+                raise TypeError("The value for Y you passed into <{my_class}> was not coercible into a <{other_class}> type coordinate".format(my_class=self.__class__.__name__, self.Y_class.__name__))
+        self.X = x
+        self.Y = y
+    #
+    def __getattr__(self, name, *args, **kwargs):
+        """
+        Called when there is no attribute by this name.
+        We use this to grab the correct variable if one of the aliases is used
+        """
+        if name in (self.X_name, self.X_abbr): #Aliases for X
+            return self.X
+        if name in (self.Y_name, self.Y_abbr): #Aliases for X
+            return self.Y
+        return object.__getattribute__(self, name, *args, **kwargs)
+    #
+    def __setattr__(self, name, value, *args, **kwargs):
+        """
+        Hijacked to ensure if we set a coordinate by its alias, it ends up being stored in the right var!
+        """
+        if name in (self.X_name, self.X_abbr): #Aliases for X
+            self.X = value
+        if name in (self.Y_name, self.Y_abbr): #Aliases for X
+            self.Y = value
+        return object.__setattr__(self, name, value, *args, **kwargs)
+    #
+    def __unicode__(self):
+        """
+        Returns a sensible expression for these
+        """
+        return u"[{x_val}, {y_val}]".format(x_val=unicode(self.X), y_val=unicode(self.Y))
 
 
+class LatLon(BasePair, lat_lon.LatLon):
+    """
+    Represents a latitude longitude pair
+        
+        Leans on lat_lon library for clever great circle calculations
+    """
+    X_name = "latitude" #Alternative name which can be used when fetching the coordinate
+    Y_name = "longitude" #Alternative name which can be used when fetching the coordinate
+    X_abbr = "lat" #Alternative name which can be used when fetching the coordinate
+    Y_abbr = "lon" #Alternative name which can be used when fetching the coordinate
+    X_class = SmartLat
+    Y_class = SmartLon
+    #
+    #Uses BasePair's init method
+class LonLat(LatLon):
+    xyinverted = True
+    
 
-
-
+class HourDec(BasePair):
+    """
+    Represents an equatorial telescope's pointing position
+    """
+    X_name = "hour_angle" #Alternative name which can be used when fetching the coordinate
+    Y_name = "declination" #Alternative name which can be used when fetching the coordinate
+    X_abbr = "ha" #Alternative name which can be used when fetching the coordinate
+    Y_abbr = "dec" #Alternative name which can be used when fetching the coordinate
+    X_class = SmartLat
+    Y_class = SmartLon
+    #
+    #Uses BasePair's init method
+class HADec(BasePair):
+    pass #Alias
 
 
 class EarthLocation(LatLon):
