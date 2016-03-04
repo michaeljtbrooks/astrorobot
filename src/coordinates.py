@@ -42,7 +42,6 @@ from dateutil import parser
 from LatLon import lat_lon
 from libraries import sidereal
 import pytz
-from __builtin__ import None
 
 
 ### Constants ###
@@ -729,12 +728,12 @@ class BasePair(object):
             try: #Inflate the X object up into the correct class
                 x = self.X_class(x)
             except TypeError as e:
-                raise TypeError("The value for X you passed into <{my_class}> was not coercible into a <{other_class}> type coordinate".format(my_class=self.__class__.__name__, self.X_class.__name__))
+                raise TypeError("The value for X you passed into <{my_class}> was not coercible into a <{other_class}> type coordinate".format(my_class=self.__class__.__name__, other_class=self.X_class.__name__))
         if not isinstance(y, BaseCoordinate): #Y isn't
             try: #Inflate the Y object up into the correct class
                 y = self.Y_class(y)
             except TypeError as e:
-                raise TypeError("The value for Y you passed into <{my_class}> was not coercible into a <{other_class}> type coordinate".format(my_class=self.__class__.__name__, self.Y_class.__name__))
+                raise TypeError("The value for Y you passed into <{my_class}> was not coercible into a <{other_class}> type coordinate".format(my_class=self.__class__.__name__, other_class=self.Y_class.__name__))
         self.X = x
         self.Y = y
     #
@@ -796,8 +795,164 @@ class HourDec(BasePair):
     Y_class = SmartLon
     #
     #Uses BasePair's init method
+    def to_RADec(self, longitude, timestamp=None):
+        """
+        Converts this point to RA at the relevant earth location, at the given UTC time
+        """
+        #Convert X
+        ra = self.X.right_ascension(longitude=longitude, timestamp=timestamp)
+        dec = self.Y
+        #Return new RADec object
+        return RADec(ra, dec)
+    def to_right_ascension(self, longitude, timestamp=None):
+        """ALIAS"""
+        return self.to_RADec(longitude, timestamp)
+    def to_right_ascension_declination(self, longitude, timestamp=None):
+        """ALIAS"""
+        return self.to_RADec(longitude, timestamp)
+    def to_ra(self, longitude, timestamp=None):
+        """ALIAS"""
+        return self.to_RADec(longitude, timestamp)
+    def to_ra_dec(self, longitude, timestamp=None):
+        """ALIAS"""
+        return self.to_RADec(longitude, timestamp)
+    #
+    def to_HADec(self, *args, **kwargs):
+        """To ensure standard output from this call, returns self"""
+        return self
+    def to_hour_angle(self, *args, **kwargs):
+        return self.to_HADec(*args, **kwargs)
+    def to_hour_angle_declination(self, *args, **kwargs):
+        return self.to_HADec(*args, **kwargs)
+    def to_ha_dec(self, *args, **kwargs):
+        return self.to_HADec(*args, **kwargs)
+    def to_ha(self, *args, **kwargs):
+        return self.to_HADec(*args, **kwargs)
+    #    
 class HADec(BasePair):
     pass #Alias
+
+
+class RADec(BasePair):
+    """
+    Represents a point on the celestial sphere
+    Equivalent to a specific hour angle at a given moment for a given longitude on the Earth!
+    """
+    X_name = "right_ascension"
+    Y_name = "declination"
+    X_abbr = "ra"
+    Y_abbr = "dec"
+    X_class = RightAscension
+    Y_class = Declination
+    #
+    def to_RADec(self, *args, **kwargs):
+        return self
+    def to_right_ascension(self, *args, **kwargs):
+        """ALIAS"""
+        return self.to_RADec(*args, **kwargs)
+    def to_right_ascension_declination(self, *args, **kwargs):
+        """ALIAS"""
+        return self.to_RADec(*args, **kwargs)
+    def to_ra(self, *args, **kwargs):
+        """ALIAS"""
+        return self.to_RADec(*args, **kwargs)
+    def to_ra_dec(self, *args, **kwargs):
+        """ALIAS"""
+        return self.to_RADec(*args, **kwargs)
+    #
+    def to_HADec(self, longitude, timestamp=None):
+        """
+        Returns the equivalent (Hour Angle, Declination) point given a location on the earth at a particular timestamp
+        """
+        #Convert X
+        ha = self.X.hour_angle(longitude=longitude, timestamp=timestamp)
+        dec = self.Y
+        #Return new RADec object
+        return HADec(ha, dec)
+    def to_hour_angle(self, *args, **kwargs):
+        return self.to_HADec(*args, **kwargs)
+    def to_hour_angle_declination(self, *args, **kwargs):
+        return self.to_HADec(*args, **kwargs)
+    def to_ha_dec(self, *args, **kwargs):
+        return self.to_HADec(*args, **kwargs)
+    def to_ha(self, *args, **kwargs):
+        return self.to_HADec(*args, **kwargs)
+    #
+class RightascensionDeclination(RADec):
+    pass #Alias
+class RightAscensionDeclination(RADec):
+    pass #Alias
+
+
+class AzAlt(BasePair):
+    """
+    Represents the location relative to the local geography that a scope is pointing to
+        
+        Given a known latitude, can map to HourAngle,Dec
+        Given a known latitude+longitude+time, can map to RA,Dec
+    """
+    X_name = "azimuth"
+    Y_name = "altitude"
+    X_abbr = "az"
+    Y_abbr = "alt"
+    X_class = Azimuth
+    Y_class = Altitude
+    #
+    def to_RADec(self, latitude, longitude, timestamp=None):
+        """
+        Maps to (Right Ascension, Declination)
+        
+            First casts to HA,Dec using latitude, 
+            Then RA,Dec using longitude+timestamp
+        """
+        #First, convert to radians
+        
+        return self
+    def to_right_ascension(self, *args, **kwargs):
+        """ALIAS"""
+        return self.to_RADec(*args, **kwargs)
+    def to_right_ascension_declination(self, *args, **kwargs):
+        """ALIAS"""
+        return self.to_RADec(*args, **kwargs)
+    def to_ra(self, *args, **kwargs):
+        """ALIAS"""
+        return self.to_RADec(*args, **kwargs)
+    def to_ra_dec(self, *args, **kwargs):
+        """ALIAS"""
+        return self.to_RADec(*args, **kwargs)
+    #
+    def to_HADec(self, latitude, *args, **kwargs):
+        """
+        Returns the equivalent (Hour Angle, Declination) point for your AzAlt at your latitude
+            
+            For Converting Az,Alt > RA,Dec:
+                x = Altitude in radians (-pi to pi)
+                y = Latitude in radians (-pi to pi)
+                z = Azimuth in radians (0 to 2pi)
+                
+                > xt = Declination in radians
+                > yt = HourAngle in radians
+        """
+        az_rad = self.X.radians()
+        alt_rad = self.Y.radians()
+        #Ensure latitude is in correct format
+        if not isinstance(latitude, SmartLat): #Cast strings / decimals for longitude into a SmartLon Longitude object
+            latitude = SmartLat(Decimal(latitude))
+        #Convert to radians
+        lat_rad = latitude.radians
+        dec_rad, ha_rad = coord_rotate_rad(alt_rad, lat_rad, az_rad)
+        
+        #Return new RADec object
+        return HADec(ha, dec)
+    def to_hour_angle(self, *args, **kwargs):
+        return self.to_HADec(*args, **kwargs)
+    def to_hour_angle_declination(self, *args, **kwargs):
+        return self.to_HADec(*args, **kwargs)
+    def to_ha_dec(self, *args, **kwargs):
+        return self.to_HADec(*args, **kwargs)
+    def to_ha(self, *args, **kwargs):
+        return self.to_HADec(*args, **kwargs)
+    #
 
 
 class EarthLocation(LatLon):
