@@ -3,3 +3,5 @@
 /lib/
 /local/
 /pip-selfcheck.json
+.pydevproject
+.project

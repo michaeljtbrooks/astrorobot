@@ -4,17 +4,28 @@
 """
 AstroRobot
     
-    Coordinates
+    DIMENSIONS
         
-        This is the representation of where objects are on the Earth and in space. Organised into three tiers of base objects:
+        Dimensions = single components which in combination will make up points on a grid
+            Latitude
+            Longitude
+            HourAngle
+            RightAscension
+            Declination
+            Azimuth
+            Altitude
+            
         
-            coordinate = one component of a pair of coordinates. Has all the machinery to convert between Deg / Rad / Hrs
-            gridlocation = a pair of coordinates
+        Coordinatepairs = specific values on two dimensions which produces a point in space
+            LatLon = a place on the Earth
+            AzAlt = a place on the sky (e.g. a telescope is pointing to) in Azimuth, Altitude
+            HaDec = a place on the sky (e.g. a telescope is pointing to) in HourAngle, Declination
+            RADec = a place on the celestial sphere
+            
+            
+        Situations:
         
-        
-        Some standards to adopt:
-        
-            A SkyPosition has three components:
+            A CelestialPosition has three components:
                 equatorial = (hour_angle,Declination)           #Where to point your equatorial mount (varies with time)
                     - hour_angle is in HOURS
                 celestial = (RA, Declination)                   #Where object is on the skymap (fixed)
@@ -22,34 +33,25 @@ AstroRobot
                 azalt = (azimuth, altitude)                     #Where to point your AzAlt mount (varies with time)
                     - azimuth is in DEGREES
             
-            A MountPosition has three components too:
+            An ObservingPosition has five components:
                 equatorial = (hour_angle,Declination)           #Where the equatorial mount is currently pointing (fixed unless motors move)
                 celestial = (RA, Declination)                   #Where on the skymap your mount is currently pointing (varies unless tracking)
                 azalt = (azimuth, altitude)                     #Where an azalt mount is currently pointing (fixed unless motors move)
+                location = (latitude, longitude)                #The observer's position on the Earth
+                time = (timestamp)                              #The UTC time of observation
                 
-            Thus, current time and current location are necessary params for working out 
             
-    
-    @TODO: Banish libraries which are using floats! Rewrite to use decimals
-        
 """
 
-from datetime import datetime, timedelta
-from dateutil import parser
 from decimal import Decimal 
 from LatLon import lat_lon
 import math
-import pytz
 #
 from libraries import sidereal
-from utils import d, dms_to_hms, hms_to_dms, deg_to_rad, rad_to_deg, dd_180, coord_rotate_rad, utc_now
+from utils import d, dms_to_hms, hms_to_dms, deg_to_rad, dd_180, utc_now
 
 
-################### Classes #########################
-
-#### Single points
-
-class BaseCoordinate(lat_lon.GeoCoord, object):
+class BaseDimension(object):
     """
     Provides methods for converting between:
     
@@ -59,7 +61,7 @@ class BaseCoordinate(lat_lon.GeoCoord, object):
         hd     Decimal hours
         rad    Radian
 
-        Depends upon LatLon's GeoCoord methods
+        Adapted from LatLon by Gen Del Raye
     """        
     
     base_mode = "dms" #Whether to assume this coordinate operates in degrees / hours or radians
@@ -74,7 +76,6 @@ class BaseCoordinate(lat_lon.GeoCoord, object):
             Sets up this object based upon its format.
             
             @TODO: handle a range of string inputs!
-            @TODO: handle degrees in range 180-360 as negative degrees (-180-0)
         """
         #Defaults
         if mode:
@@ -111,8 +112,54 @@ class BaseCoordinate(lat_lon.GeoCoord, object):
             degrees = big * Decimal("15.0")
         elif mode == "rad": #Radians
             degrees = Decimal(math.degrees(big)) % Decimal("360")
-        #Now we can pass this into super
-        super(BaseCoordinate, self).__init__(degrees, minutes, seconds)
+        #Now we can set these as class objects
+        self.degree = degrees
+        self.minute = minutes
+        self.second = seconds
+        self._update() # Clean up each variable and make them consistent
+
+    #
+    def _update(self):
+        '''
+        Given degree, minute, and second information, clean up the variables and make them
+        consistent (for example, if minutes > 60, add extra to degrees, or if degrees is
+        a decimal, add extra to minutes).
+        '''
+        self.decimal_degree = self._calc_decimaldegree(self.degree, self.minute, self.second)
+        self.degree, self.minute, self.decimal_minute, self.second = self._calc_degreeminutes(self.decimal_degree)
+    #
+    def set_minute(self, minute):
+        self.minute = d(minute)
+    #    
+    def set_second(self, second):
+        self.second = d(second)
+    #
+    def set_degree(self, degree):
+        self.degree = d(degree)
+    #
+    @staticmethod
+    def _calc_decimaldegree(degree, minute, second):
+        '''
+        Calculate decimal degree form degree, minute, second
+        '''
+        return d(degree) + d(minute)/d("60.0") + d(second)/d("3600.0")
+    
+    @staticmethod
+    def _calc_degreeminutes(decimal_degree):
+        '''
+        Calculate degree, minute second from decimal degree
+        '''
+        sign = cmp(decimal_degree, 0) # Store whether the coordinate is negative or positive
+        decimal_degree = abs(decimal_degree)
+        degree = decimal_degree//1 # Truncate degree to be an integer
+        decimal_minute = (decimal_degree - degree)*60. # Calculate the decimal minutes
+        minute = decimal_minute//1 # Truncate minute to be an integer
+        second = (decimal_minute - minute)*60. # Calculate the decimal seconds
+        # Finally, re-impose the appropriate sign
+        degree = degree*sign
+        minute = minute*sign
+        second = second*sign
+        return (degree, minute, decimal_minute, second)
     #
     def normalised(self, val=None, as_float=False):
         """
@@ -253,6 +300,35 @@ class BaseCoordinate(lat_lon.GeoCoord, object):
         out_unicode = sign + unicode(format_str.format(*new_args, **kwargs))
         return out_unicode        
     #
+    def to_string(self, format_str):
+        '''
+        Output lat, lon coordinates as string in chosen format
+        Inputs:
+            format (str) - A string of the form A%B%C where A, B and C are identifiers.
+              Unknown identifiers (e.g. ' ', ', ' or '_' will be inserted as separators 
+              in a position corresponding to the position in format.
+        Examples:
+            >> palmyra = LatLon(5.8833, -162.0833)
+            >> palmyra.to_string('D') # Degree decimal output
+            ('5.8833', '-162.0833')
+            >> palmyra.to_string('H% %D')
+            ('N 5.8833', 'W 162.0833')
+            >> palmyra.to_string('d%_%M')
+            ('5_52.998', '-162_4.998')
+        '''
+        format2value = {'H': self.get_hemisphere(),
+                        'M': abs(self.decimal_minute),
+                        'm': int(abs(self.minute)),
+                        'd': int(self.degree),
+                        'D': self.decimal_degree,
+                        'S': abs(self.second)}
+        format_elements = format_str.split('%')
+        coord_list = [str(format2value.get(element, element)) for element in format_elements]
+        coord_str = ''.join(coord_list)
+        if 'H' in format_elements: # No negative values when hemispheres are indicated
+            coord_str = coord_str.replace('-', '')
+        return coord_str
+    #
     def __unicode__(self):
         """
             Returns a string representation of this, depending on its format
@@ -288,9 +364,109 @@ class BaseCoordinate(lat_lon.GeoCoord, object):
         Identifies the object type
         """
         return self.__class__.__name__
+    #
+    def __cmp__(self, other):
+        """
+        Compares two dimension instances
+        """
+        if isinstance(other, self.__class__):
+            #Same thing as 
+            other = other.decimal_degree
+        elif isinstance(other, BaseDimension):
+            #This will start to make sense for derivative classes. If something is an Instance of BaseDimension but not of the same class,
+            #Then you've passed in a another type of dimension and should convert it first!
+            raise TypeError(u"{my_class} object calculation expected a {my_class}, but you gave a {other_class}. Please convert it to the same type of dimension first.".format(
+                            my_class=self.__class__.__name__, other_class=other.__class__.__name__)
+                            )
+        else:
+            other = d(other) #Otherwise, try to cast it to a Decimal
+        return cmp(self.decimal_degree, other.decimal_degree)
+    #
+    def __neg__(self):
+        return self.__class__(-self.decimal_degree)
+    #
+    def __pos__(self):
+        return self.__class__(self.decimal_degree)
+    #
+    def __abs__(self):
+        self.__pos__()
+        return self
+    #
+    def __add__(self, other, return_class=True):
+        """
+        Adds something to this dimension
+            
+            if other is a scalar,
+                @return: Another Dimension instance
+            if other is another class instance,
+                @return: A scalar value 
+        """
+        if isinstance(other, self.__class__):
+            #We're subtracting/adding another class, result should be a scalar
+            other = other.decimal_degree
+            return_class = False
+        elif isinstance(other, BaseDimension):
+            #This will start to make sense for derivative classes. If something is an Instance of BaseDimension but not of the same class,
+            #Then you've passed in a another type of dimension and should convert it first!
+            raise TypeError(u"{my_class} object calculation expected a {my_class}, but you gave a {other_class}. Please convert it to the same type of dimension first.".format(
+                            my_class=self.__class__.__name__, other_class=other.__class__.__name__)
+                            )
+        else:
+            other = d(other) #Otherwise, try to cast it to a Decimal
+        #
+        if return_class: #Assumes we want to return an instance of the class
+            return self.__class__(self.decimal_degree + other)
+        else:
+            return d(self.decimal_degree + other)
+    #
+    def __iadd__(self, other):
+        # other is a scalar
+        return self.__add__(other)
+    #
+    def __radd__(self, other):
+        # other is a scalar
+        return self.__add__(other)
+    #
+    def __sub__(self, other):
+        """
+        Subtracts something from this dimension
+            
+            if other is a scalar,
+                @return: Another Dimension instance
+            if other is another class instance,
+                @return: A scalar value 
+        """
+        return self.__add__(-other)
+    #
+    def __isub__(self, other):
+        # other is a scalar
+        return self.__sub__(other)
+    #
+    def __rsub__(self, other):
+        # other is a scalar
+        return self.__sub__(other)
+    #
+    def __floor__(self):
+        return self.__class__(math.floor(self.decimal_degree))
+    #
+    def __round__(self):
+        return self.__class__(round(self.decimal_degree))
+    #   
+    def __ceil__(self):
+        return self.__class__(math.ceil(self.decimal_degree))
+    #   
+    def __int__(self):
+        return self.degree
+    #
+    def __float__(self):
+        return float(self.decimal_degree)
+    #
+    def __repr__(self):
+        return self.__str__()
 
 
-class SmartLat(BaseCoordinate):
+
+class SmartLat(BaseDimension):
     """
     Represents an earth Latitude, with full casting capabilities
         
@@ -339,7 +515,7 @@ class Latitude(SmartLat):
     pass
 
 
-class SmartLon(BaseCoordinate):
+class SmartLon(BaseDimension):
     """
     Represents an earth Longitude, with full casting capabilities
     
@@ -398,7 +574,7 @@ class Longitude(SmartLon):
     pass
 
 
-class HourAngle(BaseCoordinate):
+class HourAngle(BaseDimension):
     """
     The horizontal pointing of an equatorial mounted scope.
         
@@ -453,7 +629,7 @@ class HourAngle(BaseCoordinate):
         return self
 
 
-class RightAscension(BaseCoordinate):
+class RightAscension(BaseDimension):
     """
     Represents the Right Ascension location of an object on the celestial sphere
     
@@ -525,7 +701,7 @@ class Declination(SmartLat):
     range_rotates = False #True = The range flicks from high back to low if you increase. False = Range oscillates
     
 
-class Altitude(BaseCoordinate):
+class Altitude(BaseDimension):
     """
     Represents the Altitude angle of an AltAz scope. +90 deg is the Zeneth, and -90 deg is the floor and utterly pointless to point to.
     Remember, the horizon is slightly below 0 deg for flat earth as the earth is curved and telescopes have some height
@@ -544,7 +720,7 @@ class Altitude(BaseCoordinate):
     #You cannot convert from Altitude alone to Declination because it could be any of a range of values depending on the Azimuth!
     
 
-class Azimuth(BaseCoordinate):
+class Azimuth(BaseDimension):
     """
     Represents the Azimuth angle of an AltAz scope. Range 0 to 360,  
     
@@ -559,404 +735,3 @@ class Azimuth(BaseCoordinate):
     range_rotates = True #True = The range flicks from high back to low if you increase. False = Range oscillates
 
 
-
-#### Pair of coordinates
-
-class BasePair(object):
-    """
-        Abstract class representing a point on a 2D grid defined by a pair of coordinates
-    """
-    X = None #This is my "x" coordinate of the pair
-    Y = None
-    X_name = "x" #Alternative name which can be used when fetching the coordinate
-    Y_name = "y" #Alternative name which can be used when fetching the coordinate
-    X_abbr = "x" #Alternative name which can be used when fetching the coordinate
-    Y_abbr = "y" #Alternative name which can be used when fetching the coordinate
-    X_class = BaseCoordinate
-    Y_class = BaseCoordinate
-    xyinverted = False #If x and y are inverted on initalisation
-    name = u'' #An identifier
-    #
-    def __init__(self, a=None, b=None, name=None):
-        """
-            Sets up my coordinates
-        """
-        if not self.xyinverted:
-            x = a
-            y = b
-        else: #This is an inverted class!
-            x = b
-            y = a
-        #
-        #Set the name if supplied:
-        if name is not None:
-            self.name = unicode(name)
-        #
-        #Check that x and y are suitable classes
-        if not isinstance(x, BaseCoordinate): #X isn't
-            try: #Inflate the X object up into the correct class
-                x = self.X_class(x)
-            except TypeError as e:
-                raise TypeError("The value for X you passed into <{my_class}> was not coercible into a <{other_class}> type coordinate".format(my_class=self.__class__.__name__, other_class=self.X_class.__name__))
-        if not isinstance(y, BaseCoordinate): #Y isn't
-            try: #Inflate the Y object up into the correct class
-                y = self.Y_class(y)
-            except TypeError as e:
-                raise TypeError("The value for Y you passed into <{my_class}> was not coercible into a <{other_class}> type coordinate".format(my_class=self.__class__.__name__, other_class=self.Y_class.__name__))
-        self.X = x
-        self.Y = y
-    #
-    def __getattr__(self, name, *args, **kwargs):
-        """
-        Called when there is no attribute by this name.
-        We use this to grab the correct variable if one of the aliases is used
-        """
-        if name in (self.X_name, self.X_abbr): #Aliases for X
-            return self.X
-        if name in (self.Y_name, self.Y_abbr): #Aliases for X
-            return self.Y
-        return object.__getattribute__(self, name, *args, **kwargs)
-    #
-    def __setattr__(self, name, value, *args, **kwargs):
-        """
-        Hijacked to ensure if we set a coordinate by its alias, it ends up being stored in the right var!
-        """
-        if name in (self.X_name, self.X_abbr): #Aliases for X
-            self.X = value
-        if name in (self.Y_name, self.Y_abbr): #Aliases for X
-            self.Y = value
-        return object.__setattr__(self, name, value, *args, **kwargs)
-    #
-    def __unicode__(self):
-        """
-        Returns a sensible expression for these
-        """
-        return u"[{x_val}, {y_val}]".format(x_val=unicode(self.X), y_val=unicode(self.Y))
-
-
-class LatLon(BasePair, lat_lon.LatLon):
-    """
-    Represents a latitude longitude pair
-        
-        Leans on lat_lon library for clever great circle calculations
-    """
-    X_name = "latitude" #Alternative name which can be used when fetching the coordinate
-    Y_name = "longitude" #Alternative name which can be used when fetching the coordinate
-    X_abbr = "lat" #Alternative name which can be used when fetching the coordinate
-    Y_abbr = "lon" #Alternative name which can be used when fetching the coordinate
-    X_class = SmartLat
-    Y_class = SmartLon
-    #
-    #Uses BasePair's init method
-class LonLat(LatLon):
-    xyinverted = True
-    
-
-class HourDec(BasePair):
-    """
-    Represents an equatorial telescope's pointing position
-    """
-    X_name = "hour_angle" #Alternative name which can be used when fetching the coordinate
-    Y_name = "declination" #Alternative name which can be used when fetching the coordinate
-    X_abbr = "ha" #Alternative name which can be used when fetching the coordinate
-    Y_abbr = "dec" #Alternative name which can be used when fetching the coordinate
-    X_class = SmartLat
-    Y_class = SmartLon
-    #
-    #Uses BasePair's init method
-    def to_RADec(self, longitude, timestamp=None):
-        """
-        Converts this point to RA at the relevant earth location, at the given UTC time
-        """
-        #Convert X
-        ra = self.X.right_ascension(longitude=longitude, timestamp=timestamp)
-        dec = self.Y
-        #Return new RADec object
-        return RADec(ra, dec)
-    def to_right_ascension(self, longitude, timestamp=None):
-        """ALIAS"""
-        return self.to_RADec(longitude, timestamp)
-    def to_right_ascension_declination(self, longitude, timestamp=None):
-        """ALIAS"""
-        return self.to_RADec(longitude, timestamp)
-    def to_ra(self, longitude, timestamp=None):
-        """ALIAS"""
-        return self.to_RADec(longitude, timestamp)
-    def to_ra_dec(self, longitude, timestamp=None):
-        """ALIAS"""
-        return self.to_RADec(longitude, timestamp)
-    #
-    def to_HADec(self, *args, **kwargs):
-        """To ensure standard output from this call, returns self"""
-        return self
-    def to_hour_angle(self, *args, **kwargs):
-        return self.to_HADec(*args, **kwargs)
-    def to_hour_angle_declination(self, *args, **kwargs):
-        return self.to_HADec(*args, **kwargs)
-    def to_ha_dec(self, *args, **kwargs):
-        return self.to_HADec(*args, **kwargs)
-    def to_ha(self, *args, **kwargs):
-        return self.to_HADec(*args, **kwargs)
-    #
-    def to_AzAlt(self, latitude, *args, **kwargs):
-        """
-        Converts this HADec into an AzAlt object provided that latitude is given
-        
-        @param Latitude: A latitude in decimal degrees or as a SmartLat instance 
-        @return: AzAlt object for that observer
-            
-         For Converting HA,Dec > Az,Alt:
-                x = Declination in radians (-pi to pi)
-                y = Latitude in radians (-pi to pi)
-                z = HourAngle in radians (0 to 2pi), (which requires longitude if converting from RA)
-                
-                > xt = Altitude in radians
-                > yt = Azimuth in radians
-            @param latitude: Observer's latitude in RADIANS
-            @return HA in Radians, Dec in Radians
-        """
-        if not isinstance(latitude, SmartLat):
-            latitude = SmartLat(latitude)
-        lat_rad = latitude.radians
-        ha_rad = self.X.radians
-        dec_rad = self.Y.radians
-        alt_rad, az_rad = coord_rotate_rad(dec_rad, lat_rad, ha_rad) #Convert to az + alt (coord rotate)
-        #Cast back to Deg for conversion to an AzAlt object
-        az = rad_to_deg(az_rad)
-        alt = rad_to_deg(alt_rad)
-        return AzAlt(az,alt)
-    def to_az_alt(self, *args, **kwargs):
-        return self.to_AzAlt(*args, **kwargs)
-    def to_azimuth_altitude(self, *args, **kwargs):
-        return self.to_AzAlt(*args, **kwargs)
-    def to_az(self, *args, **kwargs):
-        return self.to_AzAlt(*args, **kwargs)
-class HADec(BasePair):
-    pass #Alias
-
-
-class RADec(BasePair):
-    """
-    Represents a point on the celestial sphere
-    Equivalent to a specific hour angle at a given moment for a given longitude on the Earth!
-    """
-    X_name = "right_ascension"
-    Y_name = "declination"
-    X_abbr = "ra"
-    Y_abbr = "dec"
-    X_class = RightAscension
-    Y_class = Declination
-    #
-    def to_RADec(self, *args, **kwargs):
-        return self
-    def to_right_ascension(self, *args, **kwargs):
-        """ALIAS"""
-        return self.to_RADec(*args, **kwargs)
-    def to_right_ascension_declination(self, *args, **kwargs):
-        """ALIAS"""
-        return self.to_RADec(*args, **kwargs)
-    def to_ra(self, *args, **kwargs):
-        """ALIAS"""
-        return self.to_RADec(*args, **kwargs)
-    def to_ra_dec(self, *args, **kwargs):
-        """ALIAS"""
-        return self.to_RADec(*args, **kwargs)
-    #
-    def to_HADec(self, longitude, timestamp=None):
-        """
-        Returns the equivalent (Hour Angle, Declination) point given a location on the earth at a particular timestamp
-        """
-        #Convert X
-        ha = self.X.hour_angle(longitude=longitude, timestamp=timestamp)
-        dec = self.Y
-        #Return new RADec object
-        return HADec(ha, dec)
-    def to_hour_angle(self, *args, **kwargs):
-        return self.to_HADec(*args, **kwargs)
-    def to_hour_angle_declination(self, *args, **kwargs):
-        return self.to_HADec(*args, **kwargs)
-    def to_ha_dec(self, *args, **kwargs):
-        return self.to_HADec(*args, **kwargs)
-    def to_ha(self, *args, **kwargs):
-        return self.to_HADec(*args, **kwargs)
-    #
-class RightascensionDeclination(RADec):
-    pass #Alias
-class RightAscensionDeclination(RADec):
-    pass #Alias
-
-
-class AzAlt(BasePair):
-    """
-    Represents the location relative to the local geography that a scope is pointing to
-        
-        Given a known latitude, can map to HourAngle,Dec
-        Given a known latitude+longitude+time, can map to RA,Dec
-    """
-    X_name = "azimuth"
-    Y_name = "altitude"
-    X_abbr = "az"
-    Y_abbr = "alt"
-    X_class = Azimuth
-    Y_class = Altitude
-    #
-    def to_RADec(self, latitude, longitude, timestamp=None):
-        """
-        Maps to (Right Ascension, Declination)
-        
-            First casts to HA,Dec using latitude, 
-            Then RA,Dec using longitude+timestamp
-        """
-        #First, get HADec object:
-        ha_dec_obj = self.to_ha_dec(latitude)
-        #Now convert the HADec instance into RADec
-        ra_dec_obj = ha_dec_obj.to_ra_dec(longitude, timestamp)
-        return ra_dec_obj
-    def to_right_ascension(self, *args, **kwargs):
-        """ALIAS"""
-        return self.to_RADec(*args, **kwargs)
-    def to_right_ascension_declination(self, *args, **kwargs):
-        """ALIAS"""
-        return self.to_RADec(*args, **kwargs)
-    def to_ra(self, *args, **kwargs):
-        """ALIAS"""
-        return self.to_RADec(*args, **kwargs)
-    def to_ra_dec(self, *args, **kwargs):
-        """ALIAS"""
-        return self.to_RADec(*args, **kwargs)
-    #
-    def _rotate_to_HADec(self, lat_rad):
-        """
-        Returns the equivalent (Hour Angle, Declination) point for your AzAlt at your latitude
-            
-            For Converting Az,Alt > RA,Dec:
-                x = Altitude in radians (-pi to pi)
-                y = Latitude in radians (-pi to pi)
-                z = Azimuth in radians (0 to 2pi)
-                
-                > xt = Declination in radians
-                > yt = HourAngle in radians
-        
-            @param latitude: Observer's latitude in RADIANS
-            @return HA in Radians, Dec in Radians
-        """
-        az_rad = self.X.radians
-        alt_rad = self.Y.radians
-        dec_rad, ha_rad = coord_rotate_rad(alt_rad, lat_rad, az_rad) #Convert to hour angle + dec (coord rotate)
-        #Now return in correct order
-        return (ha_rad, dec_rad,)
-    #
-    def to_HADec(self, latitude, *args, **kwargs):
-        """
-        Returns the equivalent (Hour Angle, Declination) point for your AzAlt at your latitude
-            
-        @param latitude: The observer's latitude in decimal degrees or as a SmartLat object
-        @return: A HADec coordinate pair object 
-        """
-        #Ensure latitude is in correct format
-        if not isinstance(latitude, SmartLat): #Cast strings / decimals for longitude into a SmartLon Longitude object
-            latitude = SmartLat(Decimal(latitude))
-        #Convert to radians
-        lat_rad = latitude.radians
-        ha_rad, dec_rad = self._rotate_to_HADec(lat_rad)
-        ha = rad_to_deg(ha_rad)
-        dec = rad_to_deg(dec_rad)
-        #Return new HADec object
-        return HADec(ha, dec)
-    def to_hour_angle(self, *args, **kwargs):
-        return self.to_HADec(*args, **kwargs)
-    def to_hour_angle_declination(self, *args, **kwargs):
-        return self.to_HADec(*args, **kwargs)
-    def to_ha_dec(self, *args, **kwargs):
-        return self.to_HADec(*args, **kwargs)
-    def to_ha(self, *args, **kwargs): #Technically a misnomer!
-        return self.to_HADec(*args, **kwargs)
-    #
-    def to_AzAlt(self, *args, **kwargs):
-        return self #Already is!
-    def to_az_alt(self, *args, **kwargs):
-        return self #Already is!
-    def to_azimuth_altitude(self, *args, **kwargs):
-        return self #Already is!
-    def to_az(self, *args, **kwargs):
-        return self
-
-
-class EarthLocation(LatLon):
-    """
-    Represents a position on the Earth's surface. Allows you to return all sorts of useful things given your location:
-    
-        Location as Lat/Lon
-        Location as Lat Radians / Lon Radians
-    """
-    time_travel_offset = None
-    #
-    def __init__(self, lat='0', lon='0', time=None, *args, **kwargs):
-        """
-        @param lat: Your position's Latitude as a STRING in DEGREES
-        @param lon: Your position's Longitude as a STRING in DEGREES
-        
-        @keyword time: The time you wish to emulate. Assumes current UTC time unless you say otherwise  
-        
-        """
-        #Deal with input coordinates
-        if not (isinstance(lat, str) and isinstance(lon, str)):
-            raise SyntaxError("AstroRobot > EarthLocation: Please specify your latitude and longitude as two strings e.g lat='51.456', lon='-0.721'")
-        lat_obj = SmartLat(Decimal(lat))
-        lon_obj = SmartLon(Decimal(lon))
-        #
-        #Deal with time:        
-        if time is not None:
-            self.timetravel(time)
-        else: #No time provided, so offset is zero and default to utc_now
-            self.time_travel_offset = timedelta(seconds=0)
-        #
-        #Inflate into full object
-        super(EarthLocation, self).__init__(lat=lat_obj, lon=lon_obj, *args, **kwargs)
-    #
-    @property
-    def utc_real(self):
-        """
-        Returns current true UTC time
-        """
-        realtime = datetime.utcnow()
-        realtime = pytz.utc.localize(realtime)
-        return realtime
-    #
-    @property
-    def now(self):
-        """
-        Returns the current time after timetravel has been applied!
-        
-        @return: UTC timezone-aware "current" time, after timetravel
-        """
-        return self.utc_real + self.time_travel_offset
-    #
-    def timetravel(self, time):
-        """
-        Time travels you to the specified time!
-        
-        @param time: The time you wish to emulate.
-        
-        @return: A datetime object for your current time
-        """
-        if not isinstance(time, datetime): #Convert whatever has been supplied into a datetime
-            time = parser.parse(unicode(time)) #Assume string
-            time = pytz.utc.localize(time)
-        #Calculate offset
-        self.time_travel_offset = time - self.utc_real
-        return time #Returns the correctly inflated datetime object representing now
-    #
-    @property
-    def radians(self):
-        """
-        Returns the coordinates Lat/Lon in RADIANS (for use with sidereal!)
-        """
-        return (self.lat.radians, self.lon.radians)
-    #
-    def convert_ra_to_hourangle(self, ra):
-        """
-        Converts a given Right Ascension (in Degrees)
-        """
-        
-    
