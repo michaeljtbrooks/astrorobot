@@ -828,7 +828,40 @@ class HourDec(BasePair):
         return self.to_HADec(*args, **kwargs)
     def to_ha(self, *args, **kwargs):
         return self.to_HADec(*args, **kwargs)
-    #    
+    #
+    def to_AzAlt(self, latitude, *args, **kwargs):
+        """
+        Converts this HADec into an AzAlt object provided that latitude is given
+        
+        @param Latitude: A latitude in decimal degrees or as a SmartLat instance 
+        @return: AzAlt object for that observer
+            
+         For Converting HA,Dec > Az,Alt:
+                x = Declination in radians (-pi to pi)
+                y = Latitude in radians (-pi to pi)
+                z = HourAngle in radians (0 to 2pi), (which requires longitude if converting from RA)
+                
+                > xt = Altitude in radians
+                > yt = Azimuth in radians
+            @param latitude: Observer's latitude in RADIANS
+            @return HA in Radians, Dec in Radians
+        """
+        if not isinstance(latitude, SmartLat):
+            latitude = SmartLat(latitude)
+        lat_rad = latitude.radians
+        ha_rad = self.X.radians
+        dec_rad = self.Y.radians
+        alt_rad, az_rad = coord_rotate_rad(dec_rad, lat_rad, ha_rad) #Convert to az + alt (coord rotate)
+        #Cast back to Deg for conversion to an AzAlt object
+        az = rad_to_deg(az_rad)
+        alt = rad_to_deg(alt_rad)
+        return AzAlt(az,alt)
+    def to_az_alt(self, *args, **kwargs):
+        return self.to_AzAlt(*args, **kwargs)
+    def to_azimuth_altitude(self, *args, **kwargs):
+        return self.to_AzAlt(*args, **kwargs)
+    def to_az(self, *args, **kwargs):
+        return self.to_AzAlt(*args, **kwargs)
 class HADec(BasePair):
     pass #Alias
 
@@ -905,9 +938,11 @@ class AzAlt(BasePair):
             First casts to HA,Dec using latitude, 
             Then RA,Dec using longitude+timestamp
         """
-        #First, convert to radians
-        
-        return self
+        #First, get HADec object:
+        ha_dec_obj = self.to_ha_dec(latitude)
+        #Now convert the HADec instance into RADec
+        ra_dec_obj = ha_dec_obj.to_ra_dec(longitude, timestamp)
+        return ra_dec_obj
     def to_right_ascension(self, *args, **kwargs):
         """ALIAS"""
         return self.to_RADec(*args, **kwargs)
@@ -921,7 +956,7 @@ class AzAlt(BasePair):
         """ALIAS"""
         return self.to_RADec(*args, **kwargs)
     #
-    def to_HADec(self, latitude, *args, **kwargs):
+    def _rotate_to_HADec(self, lat_rad):
         """
         Returns the equivalent (Hour Angle, Declination) point for your AzAlt at your latitude
             
@@ -932,17 +967,32 @@ class AzAlt(BasePair):
                 
                 > xt = Declination in radians
                 > yt = HourAngle in radians
+        
+            @param latitude: Observer's latitude in RADIANS
+            @return HA in Radians, Dec in Radians
         """
-        az_rad = self.X.radians()
-        alt_rad = self.Y.radians()
+        az_rad = self.X.radians
+        alt_rad = self.Y.radians
+        dec_rad, ha_rad = coord_rotate_rad(alt_rad, lat_rad, az_rad) #Convert to hour angle + dec (coord rotate)
+        #Now return in correct order
+        return (ha_rad, dec_rad,)
+    #
+    def to_HADec(self, latitude, *args, **kwargs):
+        """
+        Returns the equivalent (Hour Angle, Declination) point for your AzAlt at your latitude
+            
+        @param latitude: The observer's latitude in decimal degrees or as a SmartLat object
+        @return: A HADec coordinate pair object 
+        """
         #Ensure latitude is in correct format
         if not isinstance(latitude, SmartLat): #Cast strings / decimals for longitude into a SmartLon Longitude object
             latitude = SmartLat(Decimal(latitude))
         #Convert to radians
         lat_rad = latitude.radians
-        dec_rad, ha_rad = coord_rotate_rad(alt_rad, lat_rad, az_rad)
-        
-        #Return new RADec object
+        ha_rad, dec_rad = self._rotate_to_HADec(lat_rad)
+        ha = rad_to_deg(ha_rad)
+        dec = rad_to_deg(dec_rad)
+        #Return new HADec object
         return HADec(ha, dec)
     def to_hour_angle(self, *args, **kwargs):
         return self.to_HADec(*args, **kwargs)
@@ -950,9 +1000,17 @@ class AzAlt(BasePair):
         return self.to_HADec(*args, **kwargs)
     def to_ha_dec(self, *args, **kwargs):
         return self.to_HADec(*args, **kwargs)
-    def to_ha(self, *args, **kwargs):
+    def to_ha(self, *args, **kwargs): #Technically a misnomer!
         return self.to_HADec(*args, **kwargs)
     #
+    def to_AzAlt(self, *args, **kwargs):
+        return self #Already is!
+    def to_az_alt(self, *args, **kwargs):
+        return self #Already is!
+    def to_azimuth_altitude(self, *args, **kwargs):
+        return self #Already is!
+    def to_az(self, *args, **kwargs):
+        return self
 
 
 class EarthLocation(LatLon):
