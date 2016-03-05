@@ -24,22 +24,16 @@ AstroRobot
             
             
         Situations:
-        
-            A CelestialPosition has three components:
-                equatorial = (hour_angle,Declination)           #Where to point your equatorial mount (varies with time)
-                    - hour_angle is in HOURS
-                celestial = (RA, Declination)                   #Where object is on the skymap (fixed)
-                    - RA is in HOURS
-                azalt = (azimuth, altitude)                     #Where to point your AzAlt mount (varies with time)
-                    - azimuth is in DEGREES
             
             An ObservingPosition has five components:
                 equatorial = (hour_angle,Declination)           #Where the equatorial mount is currently pointing (fixed unless motors move)
                 celestial = (RA, Declination)                   #Where on the skymap your mount is currently pointing (varies unless tracking)
                 azalt = (azimuth, altitude)                     #Where an azalt mount is currently pointing (fixed unless motors move)
                 location = (latitude, longitude)                #The observer's position on the Earth
-                time = (timestamp)                              #The UTC time of observation
-                
+                time_travel_offset = (timestamp)                #How far forwards or back from UTC now is the observer
+            
+                prime_subjective = Which axis we are using to calculate all others from
+
             
 """
 
@@ -729,7 +723,7 @@ class Azimuth(BaseDimension):
     """
     base_mode = "dms"
     mutable_mode = False
-    str_prefix = "Alt"
+    str_prefix = "Az"
     range_high = 360
     range_low = 0
     range_rotates = True #True = The range flicks from high back to low if you increase. False = Range oscillates
