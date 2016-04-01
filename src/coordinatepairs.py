@@ -38,11 +38,13 @@ AstroRobot
 """
 
 from decimal import Decimal 
+import ephem
 from LatLon import lat_lon
 import math
 #
 from dimensions import BaseDimension, SmartLat, SmartLon, HourAngle, RightAscension, Declination, Azimuth, Altitude
 from libraries import sidereal
+import settings
 from utils import d, dms_to_hms, hms_to_dms, deg_to_rad, rad_to_deg, dd_180, coord_rotate_rad, utc_now
 
 
@@ -263,7 +265,6 @@ class BasePair(object):
         return self.__str__()
 
 
-
 class LatLon(BasePair, lat_lon.LatLon):
     """
     Represents a latitude longitude pair
@@ -380,6 +381,38 @@ class RADec(BasePair):
     Y_abbr = "dec"
     X_class = RightAscension
     Y_class = Declination
+    apparent_position = False
+    #
+    def apparent(self, latitude, longitude, timestamp, temperature=settings.DEFAULT_TEMPERATURE, pressure=settings.DEFAULT_PRESSURE, elevation=DEFAULT_ELEVATION):
+        """
+        Takes this RADec co-ordinate and maps it to the apparent position on the sky given local atmospheric refraction
+        
+            Uses functions from PyEphem [http://rhodesmill.org/pyephem/index.html]
+        """
+        #First set up an observer
+        observer = ephem.Observer()
+        observer.lat = unicode(latitude.dd) #Accepts as a string only
+        observer.lon = unicode(longitude.dd)#Accepts as a string only
+        observer.date = timestamp.strftime("%Y/%m/%d %H:%i:%s")
+        observer.temp = temperature
+        observer.pressure = pressure
+        #Now set up the point on the Year 2000 celestial sphere:
+        ra_hr, ra_min, ra_sec = self.X.hms
+        dec_deg, dec_min, dec_sec = self.Y.dms
+        target = ephem.readdb("Target,f|S|??,{ra_hr}:{ra_min}:{ra_sec},{dec_deg}:{dec_min}:{dec_sec},0.0".format(
+                                ra_hr = ra_hr,
+                                ra_min = ra_min,
+                                ra_sec = ra_sec,
+                                dec_deg = dec_deg,
+                                dec_min = dec_min,
+                                dec_sec = dec_sec,
+                            ))
+        target.compute(observer) #Works out its Celestial position taking into account precession and refraction etc
+        #Now generate a new object
+        corrected_ra_dec = RADec(target.g_ra.split(":"), target.g_dec.split(":"))
+        #Mark it as an apparent position:
+        corrected_ra_dec.apparent_position=True
+        return corrected_ra_dec
     #
     def to_RADec(self, *args, **kwargs):
         return self
@@ -406,7 +439,7 @@ class RADec(BasePair):
         #Convert X
         ha = self.X.hour_angle(longitude=longitude, timestamp=timestamp)
         dec = self.Y
-        #Return new RADec object
+        #Create new HADec object
         return HADec(ha, dec)
     def to_hour_angle(self, *args, **kwargs):
         return self.to_HADec(*args, **kwargs)
@@ -426,7 +459,7 @@ class RADec(BasePair):
         @return: AzAlt object for that observer
         """
         #First convert to Hour Angle, Dec object:
-        ha_dec = self.to_HADec(longitude, timestamp)
+        ha_dec = self.to_HADec(longitude, timestamp) #Will be corrected for refraction here!
         #Then convert the HADec object to AzAlt
         az_alt = ha_dec.to_AzAlt(latitude)
         return az_alt

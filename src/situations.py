@@ -27,12 +27,15 @@ AstroRobot
             
             An ObservingPosition has five components:
                 equatorial = (hour_angle,Declination)           #Where the equatorial mount is currently pointing (fixed unless motors move)
-                celestial = (RA, Declination)                   #Where on the skymap your mount is currently pointing (varies unless tracking)
+                uncorrected_celestial = (RA, Declination)                   #Where on the skymap your mount is currently pointing (varies unless tracking)
+                apparent_celestial = (RA, Declination)          #Where on the skymap your mount appears to be pointing when refraction taken into account (varies unless tracking)
                 azalt = (azimuth, altitude)                     #Where an azalt mount is currently pointing (fixed unless motors move)
                 location = (latitude, longitude)                #The observer's position on the Earth
                 time_travel_offset = (timestamp)                #How far forwards or back from UTC now is the observer
             
                 prime_subjective = Which axis we are using to calculate all others from
+                humidity = The current local humidity (affects the refraction cooefficient which therefore affects apparent_celestial position)
+                
 
 """
 
@@ -42,6 +45,7 @@ import pytz
 #
 from coordinatepairs import RADec, HADec, AzAlt, LatLon, BasePair
 from dimensions import BaseDimension
+import settings
 from utils import d, utc_now
 
 
@@ -62,6 +66,7 @@ class BaseSituation(object):
     
     equatorial = HADec instance
     celestial = RADec instance
+    apparent_celestial = RADec instance corrected for refraction etc
     azalt = AzAlt instance
     location = Position on the Earth where the observer is
     time_travel_offset = Timedelta from current real UTC that this situation reflects
@@ -69,7 +74,7 @@ class BaseSituation(object):
     prime_subjective = "ha_dec" #Which element to calculate the others from / to affect if move() called
     initialised = False #Marks when this situation has been started
     #
-    def __init__(self, latitude=None, longitude=None, location=None, timestamp=None, pointing=None, *args, **kwargs):
+    def __init__(self, latitude=None, longitude=None, location=None, timestamp=None, pointing=None, temperature=settings.DEFAULT_TEMPERATURE, pressure=settings.DEFAULT_PRESSURE, *args, **kwargs):
         """
         Sets up this situation
         
@@ -81,6 +86,10 @@ class BaseSituation(object):
             @keyword timestamp: Datetime object reflecting when observing started. If omitted, UTC now will be used
             
             @keyword pointing: What your scope is pointing to as a RADec or HAdec or AzAlt instance. Default = 0,0
+            
+            @keyword temperature: What the current temperature in Celcius of your local area is (for calculating refraction etc)
+            
+            @keyword pressure: What the current pressure in mBar of your local area is (for calculating refraction etc) 
         """
         #Sanitise location
         if latitude is not None and longitude is not None:
@@ -106,6 +115,7 @@ class BaseSituation(object):
         self.az_alt = pointing.to_az_alt(latitude, longitude, timestamp)
         self.ha_dec = pointing.to_ha_dec(latitude, longitude, timestamp)
         self.ra_dec = pointing.to_ra_dec(latitude, longitude, timestamp)
+        self.ra_dec_apparent = self.ra_dec.apparent(latitude=latitude, longitude=longitude, timestamp=timestamp, temperature=temperature, pressure=pressure) 
         #
         #Now mark initialisation complete:
         self.initialised = True
@@ -134,6 +144,7 @@ class BaseSituation(object):
         self.az_alt = master_pointing.to_az_alt(self.latitude, self.longitude, time_now)
         self.ha_dec = master_pointing.to_ha_dec(self.latitude, self.longitude, time_now)
         self.ra_dec = master_pointing.to_ra_dec(self.latitude, self.longitude, time_now)
+        self.ra_dec_apparent = self.ra_dec.apparent(latitude=self.latitude, longitude=self.longitude, timestamp=self.timestamp, temperature=self.temperature, pressure=self.pressure)
     #
     def move(self, x=None, y=None):
         """
@@ -200,6 +211,10 @@ class BaseSituation(object):
     @property
     def celestial(self):
         return self.ra_dec
+    #
+    @property
+    def apparent_celestial(self):
+        return self.ra_dec_apparent
     #
     @property
     def azalt(self):

@@ -1,7 +1,11 @@
-# PIP requirements file for AstroRobot
-
-numpy
-pint	#Comprehensive units of measurement representation and interconversion
-LatLon	#Models user position in LatLon, but cannot convert into Radians
-dateutils	#Allows us to convert from simple time strings into datetime objects
-pytz	#Timezone handling
+LatLon==1.0.2
+Pint==0.7.2
+argparse==1.2.1
+dateutils==0.6.6
+numpy==1.11.0
+pyephem==3.7.6.0
+pyproj==1.9.5.1
+python-dateutil==2.5.2
+pytz==2016.3
+six==1.10.0
+wsgiref==0.1.2
