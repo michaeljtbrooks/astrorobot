@@ -58,6 +58,7 @@ class InitError(SyntaxError):
     pass
 
 
+
 class BaseSituation(object):
     """
     ABSTRACT CLASS

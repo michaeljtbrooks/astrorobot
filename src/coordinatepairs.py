@@ -383,7 +383,7 @@ class RADec(BasePair):
     Y_class = Declination
     apparent_position = False
     #
-    def apparent(self, latitude, longitude, timestamp, temperature=settings.DEFAULT_TEMPERATURE, pressure=settings.DEFAULT_PRESSURE, elevation=DEFAULT_ELEVATION):
+    def apparent(self, latitude, longitude, timestamp, temperature=settings.DEFAULT_TEMPERATURE, pressure=settings.DEFAULT_PRESSURE, elevation=settings.DEFAULT_ELEVATION):
         """
         Takes this RADec co-ordinate and maps it to the apparent position on the sky given local atmospheric refraction
         
@@ -409,7 +409,7 @@ class RADec(BasePair):
                             ))
         target.compute(observer) #Works out its Celestial position taking into account precession and refraction etc
         #Now generate a new object
-        corrected_ra_dec = RADec(target.g_ra.split(":"), target.g_dec.split(":"))
+        corrected_ra_dec = RADec(target.ra.split(":"), target.dec.split(":"))
         #Mark it as an apparent position:
         corrected_ra_dec.apparent_position=True
         return corrected_ra_dec
