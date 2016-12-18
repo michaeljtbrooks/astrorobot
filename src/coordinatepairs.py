@@ -383,6 +383,7 @@ class RADec(BasePair):
     X_class = RightAscension
     Y_class = Declination
     apparent_position = False
+    uncorrected_position = None #Where we store our original ra_dec if using apparent
     #
     def apparent(self, observer=None, latitude=None, longitude=None, timestamp=None, temperature=settings.DEFAULT_TEMPERATURE, pressure=settings.DEFAULT_PRESSURE, elevation=settings.DEFAULT_ELEVATION):
         """
@@ -397,23 +398,33 @@ class RADec(BasePair):
             observer = ephem.Observer()
             observer.lat = unicode(latitude.dd) #Accepts as a string only
             observer.lon = unicode(longitude.dd)#Accepts as a string only
-            observer.date = timestamp.strftime("%Y/%m/%d %H:%i:%s")
             observer.temp = temperature
             observer.pressure = pressure
-        #Now set up the point on the Year 2000 celestial sphere:
-        ra_hr, ra_min, ra_sec = self.X.hms
-        dec_deg, dec_min, dec_sec = self.Y.dms
-        target = ephem.readdb("Target,f|S|??,{ra_hr}:{ra_min}:{ra_sec},{dec_deg}:{dec_min}:{dec_sec},0.0".format(
+        else:
+            original_observer_date = observer.date
+            
+        #Now update the observer to the specified time:
+        observer.date = timestamp.strftime("%Y/%m/%d %H:%i:%s")
+        
+        if self.apparent_position: #This has already been corrected, so we need to work it all backwards to adjust for the new time / observer:
+            ra_hr, ra_min, ra_sec = self.uncorrected_position.X.hms
+            dec_deg, dec_min, dec_sec = self.uncorrected_position.Y.hms
+        else: #Not already corrected, so use raw ra dec from self
+            ra_hr, ra_min, ra_sec = self.X.hms
+            dec_deg, dec_min, dec_sec = self.Y.dms
+        target = ephem.readdb("Target,f|S|??,{ra_hr}:{ra_min}:{ra_sec},{dec_deg}:{dec_min}:{dec_sec},0.0,{epoch}".format(
                                 ra_hr = ra_hr,
                                 ra_min = ra_min,
                                 ra_sec = ra_sec,
                                 dec_deg = dec_deg,
                                 dec_min = dec_min,
                                 dec_sec = dec_sec,
+                                epoch = timestamp.strftime(settings.EPHEM_DB_DATE_FORMAT)
                             ))
-        target.compute(observer) #Works out its Celestial position taking into account precession and refraction etc
+        target.compute(observer, epoch=observer.date) #Works out its Celestial position taking into account precession and refraction etc
         #Now generate a new object
         corrected_ra_dec = RADec(target.ra.split(":"), target.dec.split(":"))
+        corrected_ra_dec.uncorrected_position = RADec(target.a_ra.split(":"), target.a_dec.split(":")) #Store the original position so we can work it back later
         #Mark it as an apparent position:
         corrected_ra_dec.apparent_position=True #Simple flag to allow us to track which positions are apparent vs real
         return corrected_ra_dec

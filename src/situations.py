@@ -152,7 +152,7 @@ class BaseSituation(object):
         observer = ephem.Observer()
         observer.lat = unicode(location.latitude.dd) #Accepts as a string only
         observer.lon = unicode(location.longitude.dd)#Accepts as a string only
-        observer.date = timestamp.strftime("%Y/%m/%d %H:%i:%s")
+        observer.date = timestamp.strftime(settings.EPHEM_DATE_FORMAT)
         observer.temp = temperature
         observer.pressure = pressure
         self.observer = observer
@@ -179,12 +179,29 @@ class BaseSituation(object):
         """
         master_pointing = self.get_primary()
         time_now = self.now #Means "now" according to this observer's time
-        self.observer.date = time_now.strftime("%Y/%m/%d %H:%i:%s") #Make sure the observer knows the time has changed
+        self.observer.date = time_now.strftime(settings.EPHEM_DATE_FORMAT) #Make sure the observer knows the time has changed
         self.az_alt = master_pointing.to_az_alt(self.latitude, self.longitude, time_now)
         self.ha_dec = master_pointing.to_ha_dec(self.latitude, self.longitude, time_now)
         self.ra_dec = master_pointing.to_ra_dec(self.latitude, self.longitude, time_now)
         self.ra_dec_apparent = self.ra_dec.apparent(observer=self.observer, latitude=self.latitude, longitude=self.longitude, timestamp=time_now, temperature=self.temperature, pressure=self.pressure)
         return self
+    #
+    def update_observer_time(self, observer=None, timestamp=None):
+        """
+        Update the date and time of the observer. Defaults to self.now
+        
+        @keyword observer: The observer, If omitted, will use self.observer
+        @keyword timestamp: The time to move the observer to. If omitted, will use self.now
+        
+        @return: <Observer> 
+        """
+        observer = observer or self.observer
+        if timestamp:
+            time_now = self.timetravel(timestamp)
+        else:
+            time_now = self.now
+        observer.date = time_now.strftime(settings.EPHEM_DATE_FORMAT)
+        return observer
     #
     def change_observer_position(self, location=None, latitude=None, longitude=None, timestamp=None, temperature=None, pressure=None, elevation=None):
         """
@@ -212,7 +229,7 @@ class BaseSituation(object):
         #Timetravel to the time provided:
         if timestamp:
             dt_now = self.timetravel(timestamp)
-            self.observer.date = dt_now.strftime("%Y/%m/%d %H:%i:%s")
+            self.observer.date = dt_now.strftime(settings.EPHEM_DATE_FORMAT)
         
         #Deal with other params:
         if pressure is not None:
@@ -226,7 +243,7 @@ class BaseSituation(object):
         
         return self
     #
-    def move(self, x=None, y=None):
+    def set_pointing_to(self, x=None, y=None):
         """
         Moves the pointing position by the given number of decimal degree units, or to the specified target
         You can either pass in a basepair as the first value, or dimensions / scalars as two values
@@ -259,7 +276,7 @@ class BaseSituation(object):
                 #Incompatible pair
                 raise TypeError(u"Situation.move(X,Y): You passed in incompatible dimensions for X and Y. Please enter either a CoordinatePair, or a compatible set of Dimensions, or scalar values to move().")
             #Now call move again on our target_pointing (this time the method will process it as a pair:
-            return self.move(target_pointing)
+            return self.set_pointing_to(target_pointing)
         else:
             #User has probably passed in two scalar values, they will want to MOVE the scope by the amount
             if x is None:
@@ -276,29 +293,39 @@ class BaseSituation(object):
         self.update() #Updates all secondary (dependent) measures
         return self #For chaining 
     #
-    def where_is(self, item, mode=None):
+    def where_is(self, item, timestamp=None, mode=None):
         """
         Tells you where a certain celestial object APPARENTLY is *at self.now*
         
         @param item: <unicode> A description of the item you are seeking
-        @keyword mode: What to cast the output coords into (RADec / HA / AltAz
+        @keyword timestamp: <datetime> when we are looking. Defaults to time now 
+        @keyword mode: What to cast the output coords into (RADec / HA / AltAz)
         
         @return: <RADec> Apparent coordinates of the item
         """
-        #First see if the thing is a solar system object:
         cap_item = unicode(item).capitalize()
+        
+        if timestamp is None:
+            timestamp = self.now
+        
+        #First see if the thing is a solar system object:
         if cap_item in settings.SOLAR_SYSTEM_OBJECTS:
-            obj = getattr(ephem, cap_item)() # Solar system objects are full classes on ephem
+            target = getattr(ephem, cap_item)(self.observer, epoch=time_now) # Solar system objects are full classes on ephem
         
         #See if it is a star:
-        if not obj:
+        if not target:
             try:
-                obj = ephem.star(cap_item)
+                target = ephem.star(cap_item, self.observer)
             except KeyError:
-                obj = None
+                target = None
         
-        if obj: ##HERE## Add date now and epoch now
-            obj.compute()
+        if not target: #Means item not found
+            return None
+        
+        #Ask ephem to compute the APPARENT ra_dec
+        target.compute(time_now, epoch=time_now)
+        uncorrected_ra_dec = RADec(target.ra.split(":"), target.dec.split(":"))
+        corrected_ra_dec = uncorrected_ra_dec.apparent()
         
         
     #
