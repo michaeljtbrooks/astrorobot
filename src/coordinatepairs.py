@@ -43,7 +43,7 @@ import ephem
 from LatLon import lat_lon
 import math
 #
-from dimensions import BaseDimension, SmartLat, SmartLon, HourAngle, RightAscension, Declination, Azimuth, Altitude
+from dimensions import BaseDimension, SmartLat, SmartLon, HourAngle, RightAscension, Declination, ApparentDeclination, ApparentRightAscension, Azimuth, Altitude
 from libraries import sidereal
 import settings
 from utils import d, dms_to_hms, hms_to_dms, deg_to_rad, rad_to_deg, dd_180, coord_rotate_rad, utc_now
@@ -64,8 +64,9 @@ class BasePair(object):
     Y_class = BaseDimension
     xyinverted = False #If x and y are inverted on initalisation
     name = u'' #An identifier
+    apparent_position = None
     #
-    def __init__(self, a=None, b=None, name=None):
+    def __init__(self, a=None, b=None, name=None, apparent=None):
         """
             Sets up my coordinates
         """
@@ -93,6 +94,9 @@ class BasePair(object):
                 raise TypeError(u"The value for Y you passed into <{my_class}> was not coercible into a <{other_class}> type coordinate".format(my_class=self.__class__.__name__, other_class=self.Y_class.__name__))
         self.X = x
         self.Y = y
+        
+        #Deal with the "apparent" flag:
+        self.apparent_position = apparent or self.apparent_position #This way mixins can override the value so long as they are put to the LEFT
     #
     def __getattr__(self, name, *args, **kwargs):
         """
@@ -284,6 +288,7 @@ class LonLat(LatLon):
     xyinverted = True
     
 
+
 class HourDec(BasePair):
     """
     Represents an equatorial telescope's pointing position
@@ -293,7 +298,7 @@ class HourDec(BasePair):
     X_abbr = "ha" #Alternative name which can be used when fetching the coordinate
     Y_abbr = "dec" #Alternative name which can be used when fetching the coordinate
     X_class = HourAngle
-    Y_class = Declination
+    Y_class = ApparentDeclination
     #
     #Uses BasePair's init method
     def to_RADec(self, longitude, timestamp=None):
@@ -382,7 +387,6 @@ class RADec(BasePair):
     Y_abbr = "dec"
     X_class = RightAscension
     Y_class = Declination
-    apparent_position = False
     uncorrected_position = None #Where we store our original ra_dec if using apparent
     #
     def apparent(self, observer=None, latitude=None, longitude=None, timestamp=None, temperature=settings.DEFAULT_TEMPERATURE, pressure=settings.DEFAULT_PRESSURE, elevation=settings.DEFAULT_ELEVATION):
@@ -423,7 +427,7 @@ class RADec(BasePair):
                             ))
         target.compute(observer, epoch=observer.date) #Works out its Celestial position taking into account precession and refraction etc
         #Now generate a new object
-        corrected_ra_dec = RADec(target.ra.split(":"), target.dec.split(":"))
+        corrected_ra_dec = ApparentRADec(target.ra.split(":"), target.dec.split(":"))
         corrected_ra_dec.uncorrected_position = RADec(target.a_ra.split(":"), target.a_dec.split(":")) #Store the original position so we can work it back later
         #Mark it as an apparent position:
         corrected_ra_dec.apparent_position=True #Simple flag to allow us to track which positions are apparent vs real
@@ -516,6 +520,19 @@ class DeclinationRightAscension(DecRA):
     pass
 class DeclinationRightascension(DecRA):
     pass
+
+class ApparentRADec(RADec):
+    """
+    A variant of RADec showing an "apparent" position
+    """
+    apparent_position=True
+#ALIASES
+ApparentRightascensionDeclination = ApparentRADec
+ApparentRightAscensionDeclination = ApparentRADec
+class ApparentDecRA(ApparentRADec):
+    xyinverted = True
+ApparentDeclinationRightAscension = ApparentDecRA
+ApparentDeclinationRightascension = ApparentDecRA
 
 
 class AzAlt(BasePair):

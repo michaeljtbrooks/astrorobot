@@ -39,10 +39,11 @@ AstroRobot
 
 from decimal import Decimal 
 from LatLon import lat_lon
+from ephem import Angle
 import math
 #
 from libraries import sidereal
-from utils import d, dms_to_hms, hms_to_dms, deg_to_rad, dd_180, utc_now
+from utils import d, dms_to_hms, hms_to_dms, deg_to_rad, rad_to_deg, dd_180, utc_now
 
 
 class BaseDimension(object):
@@ -69,6 +70,13 @@ class BaseDimension(object):
         """
             Sets up this object based upon its format.
             
+            Strategies:
+                - Big carries the whole data (e.g. a decimal notation)
+                - Big carries deg / min / sec as a tuple 
+                - Big / medium / small correspond to deg / min / secs
+            
+            Big can be a float, decimal or Pyephem Angle
+            
             @TODO: handle a range of string inputs!
         """
         #Defaults
@@ -89,6 +97,8 @@ class BaseDimension(object):
                 small = val_tup[2]
             except IndexError:
                 pass #These smaller entities are not mandatory!
+        elif isinstance(big, Angle): #It's a pyephem angle
+            big = rad_to_deg(Angle)
         #Setting to decimal
         big = Decimal(unicode(big))
         medium = Decimal(unicode(medium))
@@ -584,6 +594,7 @@ class HourAngle(BaseDimension):
     range_high = 24
     range_low = 0
     range_rotates = True #True = The range flicks from high back to low if you increase. False = Range oscillates
+    apparent_position = True
     #
     def right_ascension(self, longitude, timestamp=None):
         """
@@ -604,7 +615,7 @@ class HourAngle(BaseDimension):
         #Now call upon Sidereal's function
         ra_rad =  sidereal.hourAngleToRA(hr_rad, timestamp, long_rad) #Outputs hour angle in radians
         #Now inflate the output hour angle into a proper object
-        return RightAscension(ra_rad, mode="rad") #Will accept a rad, and return a properly filled HourAngle
+        return ApparentRightAscension(ra_rad, mode="rad") #Will accept a rad, and return a properly filled HourAngle
     def to_right_ascension(self, *args, **kwargs):
         """ALIAS"""
         return self.right_ascension(*args, **kwargs)
@@ -636,6 +647,7 @@ class RightAscension(BaseDimension):
     range_high = 24
     range_low = 0
     range_rotates = True #True = The range flicks from high back to low if you increase. False = Range oscillates
+    apparent_position = False #Vanilla RA is not corrected for gravity & atmospheric lensing
     #
     def hour_angle(self, longitude, timestamp=None):
         """
@@ -656,7 +668,9 @@ class RightAscension(BaseDimension):
         #Now call upon Sidereal's function
         hour_angle_rad =  sidereal.raToHourAngle(ra_rad, timestamp, long_rad) #Outputs hour angle in radians
         #Now inflate the output hour angle into a proper object
-        return HourAngle(hour_angle_rad, mode="rad") #Will accept a rad, and return a properly filled HourAngle
+        ha = HourAngle(hour_angle_rad, mode="rad") #Will accept a rad, and return a properly filled HourAngle
+        ha.apparent_position = self.apparent_position #Make sure it knows if this is apparent or not!
+        return ha
     def to_hour_angle(self, *args, **kwargs):
         """ALIAS"""
         return self.hour_angle(*args, **kwargs)
@@ -673,6 +687,11 @@ class RightAscension(BaseDimension):
         return self
     def to_ra(self, *args, **kwargs):
         return self
+class ApparentRightAscension(RightAscension):
+    """
+    Variant of the class with a flag to say that it's the coordinates of where something appears
+    """
+    apparent_position = True
 
 
 class Declination(SmartLat):
@@ -693,7 +712,12 @@ class Declination(SmartLat):
     range_high = 90
     range_low = -90
     range_rotates = False #True = The range flicks from high back to low if you increase. False = Range oscillates
-    
+class ApparentDeclination(Declination):
+    """
+    Variant of the class with a flag to say that it's the coordinates of where something appears
+    """
+    apparent_position=True
+
 
 class Altitude(BaseDimension):
     """
@@ -710,7 +734,7 @@ class Altitude(BaseDimension):
     range_high = 90
     range_low = -90
     range_rotates = False #True = The range flicks from high back to low if you increase. False = Range oscillates
-    
+    apparent_position = True
     #You cannot convert from Altitude alone to Declination because it could be any of a range of values depending on the Azimuth!
     
 
@@ -727,5 +751,5 @@ class Azimuth(BaseDimension):
     range_high = 360
     range_low = 0
     range_rotates = True #True = The range flicks from high back to low if you increase. False = Range oscillates
-
+    apparent_position = True
 
