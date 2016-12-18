@@ -36,8 +36,9 @@ AstroRobot
                 prime_subjective = Which axis we are using to calculate all others from
             
 """
-
-from decimal import Decimal 
+from __future__ import unicode_literals
+#
+from decimal import Decimal
 import ephem
 from LatLon import lat_lon
 import math
@@ -382,36 +383,50 @@ class RADec(BasePair):
     X_class = RightAscension
     Y_class = Declination
     apparent_position = False
+    uncorrected_position = None #Where we store our original ra_dec if using apparent
     #
-    def apparent(self, latitude, longitude, timestamp, temperature=settings.DEFAULT_TEMPERATURE, pressure=settings.DEFAULT_PRESSURE, elevation=settings.DEFAULT_ELEVATION):
+    def apparent(self, observer=None, latitude=None, longitude=None, timestamp=None, temperature=settings.DEFAULT_TEMPERATURE, pressure=settings.DEFAULT_PRESSURE, elevation=settings.DEFAULT_ELEVATION):
         """
         Takes this RADec co-ordinate and maps it to the apparent position on the sky given local atmospheric refraction
         
             Uses functions from PyEphem [http://rhodesmill.org/pyephem/index.html]
         """
-        #First set up an observer
-        observer = ephem.Observer()
-        observer.lat = unicode(latitude.dd) #Accepts as a string only
-        observer.lon = unicode(longitude.dd)#Accepts as a string only
+        if timestamp is None:
+            timestamp = utc_now()
+        if not observer:
+            #First set up an observer
+            observer = ephem.Observer()
+            observer.lat = unicode(latitude.dd) #Accepts as a string only
+            observer.lon = unicode(longitude.dd)#Accepts as a string only
+            observer.temp = temperature
+            observer.pressure = pressure
+        else:
+            original_observer_date = observer.date
+            
+        #Now update the observer to the specified time:
         observer.date = timestamp.strftime("%Y/%m/%d %H:%i:%s")
-        observer.temp = temperature
-        observer.pressure = pressure
-        #Now set up the point on the Year 2000 celestial sphere:
-        ra_hr, ra_min, ra_sec = self.X.hms
-        dec_deg, dec_min, dec_sec = self.Y.dms
-        target = ephem.readdb("Target,f|S|??,{ra_hr}:{ra_min}:{ra_sec},{dec_deg}:{dec_min}:{dec_sec},0.0".format(
+        
+        if self.apparent_position: #This has already been corrected, so we need to work it all backwards to adjust for the new time / observer:
+            ra_hr, ra_min, ra_sec = self.uncorrected_position.X.hms
+            dec_deg, dec_min, dec_sec = self.uncorrected_position.Y.hms
+        else: #Not already corrected, so use raw ra dec from self
+            ra_hr, ra_min, ra_sec = self.X.hms
+            dec_deg, dec_min, dec_sec = self.Y.dms
+        target = ephem.readdb("Target,f|S|??,{ra_hr}:{ra_min}:{ra_sec},{dec_deg}:{dec_min}:{dec_sec},0.0,{epoch}".format(
                                 ra_hr = ra_hr,
                                 ra_min = ra_min,
                                 ra_sec = ra_sec,
                                 dec_deg = dec_deg,
                                 dec_min = dec_min,
                                 dec_sec = dec_sec,
+                                epoch = timestamp.strftime(settings.EPHEM_DB_DATE_FORMAT)
                             ))
-        target.compute(observer) #Works out its Celestial position taking into account precession and refraction etc
+        target.compute(observer, epoch=observer.date) #Works out its Celestial position taking into account precession and refraction etc
         #Now generate a new object
         corrected_ra_dec = RADec(target.ra.split(":"), target.dec.split(":"))
+        corrected_ra_dec.uncorrected_position = RADec(target.a_ra.split(":"), target.a_dec.split(":")) #Store the original position so we can work it back later
         #Mark it as an apparent position:
-        corrected_ra_dec.apparent_position=True
+        corrected_ra_dec.apparent_position=True #Simple flag to allow us to track which positions are apparent vs real
         return corrected_ra_dec
     #
     def to_RADec(self, *args, **kwargs):
@@ -449,6 +464,28 @@ class RADec(BasePair):
         return self.to_HADec(*args, **kwargs)
     def to_ha(self, *args, **kwargs):
         return self.to_HADec(*args, **kwargs)
+    #
+    def to_HADec_apparent(self, observer):
+        """
+        Returns the equivalent (Hour Angle, Declination) for an observer on the earth with known location.
+        Will correct for atmospheric refraction.
+        
+        @param observer: A PyEphem observer object 
+        """
+        ra_dec = self.apparent(observer=observer) #Whether or not self is apparent doesn't matter. The time may have changed, so need to recompute it
+        #Convert X
+        ha = ra_dec.X.hour_angle(longitude=observer.lon, observer=observer.date)
+        dec = ra_dec.Y
+        #Create new HADec object
+        return HADec(ha, dec)
+    def to_hour_angle_apparent(self, *args, **kwargs):
+        return self.to_HADec_apparent(*args, **kwargs)
+    def to_hour_angle_declination_apparent(self, *args, **kwargs):
+        return self.to_HADec_apparent(*args, **kwargs)
+    def to_ha_dec_apparent(self, *args, **kwargs):
+        return self.to_HADec_apparent(*args, **kwargs)
+    def to_ha_apparent(self, *args, **kwargs):
+        return self.to_HADec_apparent(*args, **kwargs)
     #
     def to_AzAlt(self, latitude, longitude, timestamp=None, *args, **kwargs):
         """
@@ -532,7 +569,7 @@ class AzAlt(BasePair):
                 > xt = Declination in radians
                 > yt = HourAngle in radians
         
-            @param latitude: Observer's latitude in RADIANS
+            @param lat_rad: Observer's latitude in RADIANS
             @return HA in Radians, Dec in Radians
         """
         az_rad = self.X.radians
