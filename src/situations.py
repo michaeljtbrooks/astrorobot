@@ -33,9 +33,14 @@ AstroRobot
         
         Coordinatepairs = specific values on two dimensions which produces a point in space
             LatLon = a place on the Earth
-            AzAlt = a place on the sky (e.g. a telescope is pointing to) in Azimuth, Altitude
-            HaDec = a place on the sky (e.g. a telescope is pointing to) in HourAngle, Declination
-            RADec = a place on the celestial sphere
+            RADec = a place on the celestial sphere has two modes:
+                Actual = the true location if viewed outside Earth's gravity field and outside Earth's atmosphere
+                Apparent = where it appears to be when viewed from your location on the Earth
+            HaDec = a place on the sky (e.g. a telescope is pointing to) in HourAngle, Declination. This is always relative to the APPARENT RADec.
+            AzAlt = a place on the sky (e.g. a telescope is pointing to) in Azimuth, Altitude. This is always relative to the APPARENT RADec. 
+                
+            
+
             
             
         Situations:
@@ -63,9 +68,11 @@ import pytz
 #
 import settings
 from coordinatepairs import RADec, HADec, AzAlt, LatLon, BasePair
-from dimensions import BaseDimension, SmartLat
+from dimensions import BaseDimension, SmartLat, ApparentRightAscension,\
+    ApparentDeclination
 from exceptions import InitError
 from utils import d, utc_now
+from libraries import sidereal
 
 
 
@@ -348,6 +355,53 @@ class Observer(TimetrackerMixin, TargetSearchMixin):
         @TODO:
         """
         pass
+    #
+    def _get_sidereal_time_obj(self, timestamp=None, longitude=None):
+        """
+        Resolves the sidereal time of the specified location at the specified timestamp
+        
+        @keyword timestamp: <datetime> The UTC time you wish to query for, defaults to self.now (Observer's time)
+        @keyword longitude: <LatLon> or <SmartLon> The longitude you wish to query for (defaults to self.location.longitude) 
+        
+        @return: <SiderealTime> object representing your local hour angle
+            
+            (NB: SiderealTime instance carries two useful properties:
+                .hours: the hours as a float
+                .radians: the hours in radians (needs normalising to 2*Pi
+        
+        """
+        if timestamp is None:
+            timestamp = self.now
+        if longitude is None:
+            longitude_radians = self.location.longitude.radians()
+        
+        greenwich_sidereal_time = sidereal.SiderealTime.fromDatetime(timestamp) #The Sidereal Time at longitude 0.0
+        location_sidereal_time = greenwich_sidereal_time.lst(longitude_radians) #Your location's Sidereal Time (at your longitude)
+        
+        return location_sidereal_time
+    #
+    def get_sidereal_time(self, timestamp=None, longitude=None):
+        """
+        Resolves the sidereal time of the specified location at the specified timestamp
+        
+        @keyword timestamp: <datetime> The UTC time you wish to query for, defaults to self.now (Observer's time)
+        @keyword longitude: <LatLon> or <SmartLon> The longitude you wish to query for (defaults to self.location.longitude) 
+        
+        @return: <Decimal> sidereal time in hours
+        """
+        lst_time_out = self._get_sidereal_time_obj(timestamp=timestamp, longitude=longitude).hours #Returns a float hours
+        return d(lst_time_out) #Return as Decimal
+    #
+    @property
+    def st(self):
+        return self.get_sidereal_time()
+    @property
+    def sidereal(self):
+        return self.get_sidereal_time()
+    @property
+    def sidereal_time(self):
+        return self.get_sidereal_time()
+
 
 
 class Target(object):
@@ -425,25 +479,76 @@ class Target(object):
         """
         Returns this target's expected position at the specified time
         
+        @param timestamp: <datetime> UTC time when you'd like to determine the object's position for 
+        
         @return: <Target> updated to point to specified time
         """
         new_target = deepcopy(self) #Make a copy so we don't pollute our original
         new_target.observer.timetravel(timestamp) #This will be a new observer object too, yes things can get complicated if an observer moves!!
         return new_target #Any properties called on that daughter object will 
+    
+    #--- Dimensions and CoordinatePairs ---
+    @property
+    def ra_dec(self):
+        """
+        Returns the RightAscension & Declination as a Coordinate pair
+        
+        @return <AzAlt> of target
+        """
+        return AzAlt(self.ephem_target.ra, self.ephem_target.dec, mode="rad")
+    
+    @property
+    def hour_angle(self):
+        """
+        Converts this target's Apparent RA to Hour Angle for the position of the observer
+        
+        @return: <HourAngle> of target 
+        """
+        target_apparent_ra = ApparentRightAscension(self.ra, mode="rad")
+        return target_apparent_ra.to_hour_angle(self.observer.location.longitude(), self.observer.now)
+    @property
+    def ha(self):
+        return self.hour_angle
 
-
-
+    @property
+    def ha_dec(self):
+        """
+        Returns the HourAngle, Declination pair for this target. Suitable for pointing a scope to!
+        
+        @return: <HADec> of target
+        """
+        target_ha = self.hour_angle
+        target_apparent_dec = ApparentDeclination(self.dec, mode="rad")
+        return HADec(target_ha, target_apparent_dec)
+    
+    @property
+    def az_alt(self):
+        """
+        Returns the Azimuth & Altitude as a Coordinate pair
+        
+        @return <AzAlt> of target
+        """
+        return AzAlt(self.ephem_target.az, self.ephem_target.alt, mode="rad")
 
 
 
 class BaseSituation(object):
     """
-    TODO: Change this to "Observer", be a wrapper around PyEphem's Observer
-    
     ABSTRACT CLASS
     
     Holds the relevant components for a situation = an observer on the Earth using a device to look at the celestial sphere
-    Wraps around the PyEphem Observer property, but will automatically update the observer's date to "now" such that time is tracked 
+    This class brings together the following ingredients:
+        observer = Observer (a person starting to look at the sky from a certain time at a certain geographical location)
+        pointing_target = Target (currently being pointed to)
+        sought_target = Target (being sought)
+        telescope = TelescopeWithMount (represents the telescope and the mount)
+            focus
+            motors
+            filter
+            lenses
+        camera = Camera (the optical acquisition device being used)
+    
+     
     
     equatorial = HADec instance
     celestial = RADec instance

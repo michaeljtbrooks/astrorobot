@@ -36,14 +36,16 @@ AstroRobot
 
             
 """
-
+from __future__ import unicode_literals
+#
 from decimal import Decimal 
 from LatLon import lat_lon
 from ephem import Angle
 import math
 #
 from libraries import sidereal
-from utils import d, dms_to_hms, hms_to_dms, deg_to_rad, rad_to_deg, dd_180, utc_now
+from utils import d, dms_to_hms, hms_to_dms, deg_to_rad, rad_to_deg, dd_180, utc_now,\
+    TWO_PI
 
 
 class BaseDimension(object):
@@ -70,6 +72,13 @@ class BaseDimension(object):
         """
             Sets up this object based upon its format.
             
+            @keyword mode: Allows you to specify the type of input you're giving:
+                hms = hours, minutes, seconds
+                hd = hours as a decimal
+                rad = radians (as a decimal)
+                dms = degrees, minutes, seconds
+                dd/None = decimal degrees
+                             
             Strategies:
                 - Big carries the whole data (e.g. a decimal notation)
                 - Big carries deg / min / sec as a tuple 
@@ -156,9 +165,9 @@ class BaseDimension(object):
         sign = cmp(decimal_degree, 0) # Store whether the coordinate is negative or positive
         decimal_degree = abs(decimal_degree)
         degree = decimal_degree//1 # Truncate degree to be an integer
-        decimal_minute = (decimal_degree - degree)*60. # Calculate the decimal minutes
+        decimal_minute = (decimal_degree - degree)*d("60") # Calculate the decimal minutes
         minute = decimal_minute//1 # Truncate minute to be an integer
-        second = (decimal_minute - minute)*60. # Calculate the decimal seconds
+        second = (decimal_minute - minute)*d("60") # Calculate the decimal seconds
         # Finally, re-impose the appropriate sign
         degree = degree*sign
         minute = minute*sign
@@ -167,10 +176,11 @@ class BaseDimension(object):
     #
     def normalised(self, val=None, as_float=False):
         """
-        Returns the specified value to fit the prescribed ranges and range rules
+        Returns the specified value to fit the prescribed ranges and range rules.
+        NB only works if you are normalising to this dimension's normal unit (degrees | hours | radians)
         """
         if val is None:
-            val = self.decimal_degree
+            val = self.decimal_value()
         val = d(val) #Cast to Decimal
         range_high = d(self.range_high)
         range_low = d(self.range_low)
@@ -185,7 +195,13 @@ class BaseDimension(object):
                 n_val = range_high - residual
             else: #If even, add it to the low
                 n_val = range_low + residual
-        return n_val                 
+        return n_val
+    @property
+    def norm(self):
+        """
+        ALIAS to self.normalised but with default values
+        """              
+        return self.normalised()
     #
     @property
     def hd(self):
@@ -259,6 +275,8 @@ class BaseDimension(object):
             angle = sidereal.parseLon(coord_str)
         else:
             angle = self._calc_radians()
+        #Normalise to 2*pi whatever happens:
+        angle  =  angle % TWO_PI
         return angle
     @property
     def rad(self):
@@ -332,6 +350,53 @@ class BaseDimension(object):
         if 'H' in format_elements: # No negative values when hemispheres are indicated
             coord_str = coord_str.replace('-', '')
         return coord_str
+    #
+    def value(self):
+        """
+        Returns the appropriate value based upon the mode of operation
+        
+        @return: Output depends on mode:
+            dd     Decimal degrees            <Decimal>
+            dms    Degrees, minutes, seconds  tuple(<Decimal>, <Decimal>, <Decimal>)
+            hms    Hours, minutes, seconds    tuple(<Decimal>, <Decimal>, <Decimal>)
+            hd     Decimal hours              <Decimal>
+            rad    Radians                    <Decimal>
+        """
+        mode = self.base_mode
+        if mode == "hms": #Hours, minutes, seconds supplied
+            return self.hms
+        elif mode == "hd": #Hours as decimal:
+            return self.hd
+        elif mode == "rad": #Radians
+            return self.rad
+        elif mode == "dms": #Degrees min secs
+            return self.dms
+        elif mode == "dd": #Decimal degrees
+            return self.dd
+        else:
+            return self.decimal_degree
+    val = value
+    #
+    def decimal(self):
+        """
+        Returns the decimal equivalent based upon the mode of operation
+        
+        @return: <Decimal>
+        """
+        mode = self.base_mode
+        if mode == "hms": #Hours, minutes, seconds supplied
+            return self.hd
+        elif mode == "hd": #Hours as decimal:
+            return self.hd
+        elif mode == "rad": #Radians
+            return self.rad
+        elif mode == "dms": #Degrees min secs
+            return self.dd
+        elif mode == "dd": #Decimal degrees
+            return self.dd
+        else:
+            return self.decimal_degree
+    decimal_value = decimal
     #
     def __unicode__(self):
         """
@@ -529,8 +594,8 @@ class SmartLon(BaseDimension):
     mutable_mode = False
     str_prefix = "Lon"
 
-    def __init__(self, degree = 0, minute = 0, second = 0):
-        super(SmartLon, self).__init__(degree, minute, second) # Initialize the GeoCoord
+    def __init__(self, degree = 0, minute = 0, second = 0, mode=False):
+        super(SmartLon, self).__init__(degree, minute, second, mode=mode) # Initialize the GeoCoord
         decimal_degree = self.range180() # Make sure that longitudes are reported in the range -180 to 180
         self.degree, self.minute, self.decimal_minute, self.second = self._calc_degreeminutes(decimal_degree)
         self._update()

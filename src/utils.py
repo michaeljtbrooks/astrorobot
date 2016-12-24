@@ -49,7 +49,8 @@ import pytz
 
 ### Constants ###
 PI = Decimal("3.141592653589793238462643383279502884197169399") #I hate floats! This is a far more accurate Decimal Pi
-TWO_PI = 2 * PI
+TWO_PI = Decimal("2") * PI
+TWO_PI_FLOAT = float(TWO_PI)
 
 
 def d(val, *args, **kwargs):

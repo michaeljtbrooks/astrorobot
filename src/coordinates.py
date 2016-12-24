@@ -2,35 +2,21 @@
 # -*- coding: utf8 -*-
 
 """
-AstroRobot
-    
-    Coordinates
-        
-        This is the representation of where objects are on the Earth and in space. Organised into three tiers of base objects:
-        
-            coordinate = one component of a pair of coordinates. Has all the machinery to convert between Deg / Rad / Hrs
-            gridlocation = a pair of coordinates
-        
-        
-        Some standards to adopt:
-        
-            A SkyPosition has three components:
-                equatorial = (hour_angle,Declination)           #Where to point your equatorial mount (varies with time)
-                    - hour_angle is in HOURS
-                celestial = (RA, Declination)                   #Where object is on the skymap (fixed)
-                    - RA is in HOURS
-                azalt = (azimuth, altitude)                     #Where to point your AzAlt mount (varies with time)
-                    - azimuth is in DEGREES
-            
-            A MountPosition has three components too:
-                equatorial = (hour_angle,Declination)           #Where the equatorial mount is currently pointing (fixed unless motors move)
-                celestial = (RA, Declination)                   #Where on the skymap your mount is currently pointing (varies unless tracking)
-                azalt = (azimuth, altitude)                     #Where an azalt mount is currently pointing (fixed unless motors move)
-                
-            Thus, current time and current location are necessary params for working out 
-            
-    
-    @TODO: Banish libraries which are using floats! Rewrite to use decimals
+
+
+OBSOLETE - use dimensions.py instead!!!
+
+OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE 
+OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE 
+OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE 
+OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE 
+OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE 
+OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE 
+OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE 
+OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE 
+OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE 
+OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE 
+OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE OBSOLETE 
         
 """
 

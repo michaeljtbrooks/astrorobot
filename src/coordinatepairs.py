@@ -66,9 +66,19 @@ class BasePair(object):
     name = u'' #An identifier
     apparent_position = None
     #
-    def __init__(self, a=None, b=None, name=None, apparent=None):
+    def __init__(self, a=None, b=None, name=None, apparent=None, mode=None):
         """
-            Sets up my coordinates
+        Sets up my coordinates
+        
+        @param a: The X co-ordinate, either as a decimal, a tuple of big/med/small or a dimensions class instance
+        @param b: The Y co-ordinate, either as a decimal, a tuple of big/med/small or a dimensions class instance
+        @keyword apparent: <Boolean> If True, this BasePair will be regarded as the "apparent" position rather than actual. Default is None
+        @keyword mode: Allows you to specify the type of input you're giving:
+            hms = hours, minutes, seconds
+            hd = hours as a decimal
+            rad = radians (as a decimal)
+            dms = degrees, minutes, seconds
+            dd/None = decimal degrees
         """
         if not self.xyinverted:
             x = a
@@ -84,13 +94,15 @@ class BasePair(object):
         #Check that x and y are suitable classes
         if not isinstance(x, BaseDimension): #X isn't
             try: #Inflate the X object up into the correct class
-                x = self.X_class(x)
+                x = self.X_class(x, mode=mode)
             except TypeError as e:
+                raise
                 raise TypeError(u"The value for X you passed into <{my_class}> was not coercible into a <{other_class}> type coordinate".format(my_class=self.__class__.__name__, other_class=self.X_class.__name__))
         if not isinstance(y, BaseDimension): #Y isn't
             try: #Inflate the Y object up into the correct class
-                y = self.Y_class(y)
+                y = self.Y_class(y, mode=mode)
             except TypeError as e:
+                raise
                 raise TypeError(u"The value for Y you passed into <{my_class}> was not coercible into a <{other_class}> type coordinate".format(my_class=self.__class__.__name__, other_class=self.Y_class.__name__))
         self.X = x
         self.Y = y
@@ -368,7 +380,7 @@ class HourDec(BasePair):
         return self.to_AzAlt(*args, **kwargs)
     def to_az(self, *args, **kwargs):
         return self.to_AzAlt(*args, **kwargs)
-class HADec(BasePair):
+class HADec(HourDec):
     pass #Alias
 class DecHour(HADec):
     xyinverted = True
@@ -388,7 +400,8 @@ class RADec(BasePair):
     X_class = RightAscension
     Y_class = Declination
     uncorrected_position = None #Where we store our original ra_dec if using apparent
-    #
+    apparent_position = False
+    
     def apparent(self, observer=None, latitude=None, longitude=None, timestamp=None, temperature=settings.DEFAULT_TEMPERATURE, pressure=settings.DEFAULT_PRESSURE, elevation=settings.DEFAULT_ELEVATION):
         """
         Takes this RADec co-ordinate and maps it to the apparent position on the sky given local atmospheric refraction
@@ -525,6 +538,8 @@ class ApparentRADec(RADec):
     """
     A variant of RADec showing an "apparent" position
     """
+    X_class = ApparentRightAscension
+    Y_class = ApparentDeclination
     apparent_position=True
 #ALIASES
 ApparentRightascensionDeclination = ApparentRADec
