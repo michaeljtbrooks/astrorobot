@@ -9,6 +9,7 @@ AstroRobot
 from __future__ import unicode_literals
 #
 from dateutil import parser
+from datetime import datetime
 from decimal import Decimal as d
 import ephem
 import unittest
@@ -16,6 +17,7 @@ import unittest
 from dimensions import RightAscension, utc_now
 from coordinatepairs import ApparentRADec, LatLon
 from libraries import sidereal
+from situations import Observer, Target
 
 
 class TestSingleCoordinates(unittest.TestCase):
@@ -50,7 +52,7 @@ def compare_pyephem_with_my_code():
     latitude = "51:24.385"
     longitude = "-0:43.44"
     my_latlon = LatLon(d("51.410684"), d("-0.728876"))
-    my_time = parser.parse("23 Dec 2016 17:15:05")
+    my_time = datetime.utcnow()
     #
     # PyEphem's calculations
     observer = ephem.Observer()
@@ -77,9 +79,21 @@ def compare_pyephem_with_my_code():
     
     print(dir(betelgeuse))
     print(dir(observer))
-    
+
+
+def give_it_a_spin():
+    """
+    Tests basic functionality of Astrorobot
+    """
+    ob = Observer(location="London")
+    s = Target(ob, "Betelgeuse")
+    print(s.ra)
+    print("RA: %s, Dec: %s" % (s.ra, s.dec))
+    print(unicode(s.ra_dec))
 
 
 if __name__ == "__main__":
-    compare_pyephem_with_my_code()
+    give_it_a_spin()
+    #compare_pyephem_with_my_code()
     #unittest.main()
+    

@@ -279,7 +279,7 @@ class BasePair(object):
             return self.__class__(new_X, new_Y)
     #
     def __repr__(self):
-        return self.__str__()
+        return str(self.__unicode__())
 
 
 class LatLon(BasePair, lat_lon.LatLon):

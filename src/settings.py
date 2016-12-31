@@ -58,5 +58,5 @@ SOLAR_SYSTEM_OBJECTS = (
 )
 
 ## How our date is formatted
-EPHEM_OBSERVER_DATE_FORMAT = "%Y/%m/%d %H:%i:%s"
-EPHEM_DB_DATE_FORMAT = "%m/%d/%Y %H:%i:%s" #American dates are dumb. Day < month < year... got it? ffs.
+EPHEM_OBSERVER_DATE_FORMAT = "%Y/%m/%d %H:%M:%S"
+EPHEM_DB_DATE_FORMAT = "%m/%d/%Y %H:%M:%S" #American dates are dumb. Day < month < year... got it? ffs.

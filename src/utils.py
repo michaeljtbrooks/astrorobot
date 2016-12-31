@@ -39,12 +39,14 @@ AstroRobot
 
                  
 """
-
+from __future__ import unicode_literals
+#
 from datetime import datetime
 from decimal import Decimal 
 import math
 #
 import pytz
+from ephem import Angle
 
 
 ### Constants ###
@@ -135,7 +137,10 @@ def rad_to_deg(radians):
     """
     Purist Decimal method for radians to degrees
     """
-    radians = Decimal(unicode(radians))
+    if isinstance(radians, (Angle,)): #Ephem doesn't output a numerical value with unicode
+        radians = Decimal(float(radians))
+    else:
+        radians = Decimal(unicode(radians))
     degrees = radians * (360/TWO_PI)
     degrees = degrees % (Decimal("360"))
     return degrees

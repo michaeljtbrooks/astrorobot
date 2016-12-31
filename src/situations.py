@@ -67,10 +67,10 @@ import ephem
 import pytz
 #
 import settings
-from coordinatepairs import RADec, HADec, AzAlt, LatLon, BasePair
+from coordinatepairs import RADec, HADec, AzAlt, LatLon, BasePair, ApparentRADec
 from dimensions import BaseDimension, SmartLat, ApparentRightAscension,\
     ApparentDeclination
-from exceptions import InitError
+from astrorobot_exceptions import InitError
 from utils import d, utc_now
 from libraries import sidereal
 
@@ -175,7 +175,9 @@ class TimetrackerMixin(object):
         Gives the time as a string suitable for an ephem Observer to consume
         @return: <str> Representation of the datetime
         """
-        return self.now.strftime(settings.EPHEM_OBSERVER_DATE_FORMAT)
+        out_date_str = self.now.strftime(settings.EPHEM_OBSERVER_DATE_FORMAT)
+        print(out_date_str)
+        return out_date_str
     
     @property
     def now_ephem_db_str(self):
@@ -206,10 +208,10 @@ class TargetSearchMixin(object):
         #See if it is a star:
         if not ephem_target:
             try:
-                ephem_target = ephem.star(cap_item, self.observer)
+                ephem_target = ephem.star(cap_item, self.ephem_observer)
             except KeyError:
                 ephem_target = None
-        
+        print("Target: %s" % ephem_target)
         return ephem_target
     #
     def _get_ephem_target(self, item, *args, **kwargs):
@@ -259,7 +261,8 @@ class Observer(TimetrackerMixin, TargetSearchMixin):
             except KeyError: #Location not found in ephem... search online??
                 pass
             else:
-                self.location = LatLon(city.lat.split(":"), city.lon.split(":")) #Casts into decimal location
+                print(dir(city))
+                self.location = LatLon(float(city.lat), float(city.lon), mode="rad") #Casts into decimal location
         
         if latitude is not None and longitude is not None:
             self.location = LatLon(latitude, longitude) #This will also cast any lat lon strings into proper numbers
@@ -404,7 +407,7 @@ class Observer(TimetrackerMixin, TargetSearchMixin):
 
 
 
-class Target(object):
+class Target(TargetSearchMixin):
     """
     Represents an object on the celestial sphere, may be star / planet / satellite / piece of space junk
     
@@ -429,8 +432,9 @@ class Target(object):
     """
     ephem_target = None #Will store PyEphem's object here
     observer = None #Stores our observer
+    ephem_observer = None #Stores our Ephem Observer object, allowing us to use common mixin
     
-    def __init__(self, observer, name=None, epoch=None, ra=None, dec=None, az=None, alt=None, ha=None, target_type="fixed"):
+    def __init__(self, observer=None, name=None, epoch=None, ra=None, dec=None, az=None, alt=None, ha=None, target_type="fixed"):
         """
         Creates the relevant target either by lookup name or coordinates
         
@@ -453,8 +457,15 @@ class Target(object):
         @keyword az: <Azimuth> or (tuple: deg,min,sec) or <Decimal(Az)> The target's position in azimuth        
         @keyword alt: <Altitude> or (tuple: deg,min,sec) or <Decimal(Alt)> The target's position in altitude
         """
-        if not isinstance(observer, ephem.Observer):
+        if not isinstance(observer, Observer):
             raise InitError("Target must be passed an Observer to know where it is!")
+        self.observer = observer
+        self.ephem_observer = observer.ephem_observer
+        
+        print("Target init name: %s " % name)
+        if name:
+            ephem_target = self.ephem_find(name)
+            self.ephem_target = ephem_target
         
     def __getattr__(self, name, *args):
         """
@@ -465,15 +476,16 @@ class Target(object):
         
         @return: VARIOUS - Depending on the underlying function!
         """
-        def wrapper(*args, **kwargs):
-            ephem_observer = self.observer.updated_ephem_observer() #Update the latest time
-            self.compute(ephem_observer) #Updates this to the latest observer time
-            try:
+        self.ephem_observer = self.observer.updated_ephem_observer() #Update the latest time
+        self.ephem_target.compute(self.ephem_observer) #Updates this to the latest observer time
+        output_attr = getattr(self.ephem_target, name)
+        if callable(output_attr): #Proxy to a wrapper function if this is a callable
+            def wrapper(*args, **kwargs):
                 output = getattr(self.ephem_target, name)(*args, **kwargs)
-            except TypeError: #Occurs if something is not callable, i.e. a straight property
-                output = getattr(self.ephem_target)
-            return output
-        return wrapper #This wrapper partial allows us to pass *args and **kwargs into a __getattr__ situation
+                return output
+            return wrapper #This wrapper partial allows us to pass *args and **kwargs into a __getattr__ situation
+        else: #If not a function, just return the attr
+            return output_attr
     
     def position_at(self, timestamp):
         """
@@ -495,7 +507,7 @@ class Target(object):
         
         @return <AzAlt> of target
         """
-        return AzAlt(self.ephem_target.ra, self.ephem_target.dec, mode="rad")
+        return ApparentRADec(self.ephem_target.ra, self.ephem_target.dec, mode="rad")
     
     @property
     def hour_angle(self):

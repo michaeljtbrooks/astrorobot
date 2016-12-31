@@ -8,7 +8,7 @@ AstroRobot
 
 from __future__ import unicode_literals
 
-class InitError(SyntaxError):
+class InitError(Exception):
     """
     A class to represent incorrect setting up of your situation 
     """

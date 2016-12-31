@@ -107,7 +107,7 @@ class BaseDimension(object):
             except IndexError:
                 pass #These smaller entities are not mandatory!
         elif isinstance(big, Angle): #It's a pyephem angle
-            big = rad_to_deg(Angle)
+            big = rad_to_deg(big)
         #Setting to decimal
         big = Decimal(unicode(big))
         medium = Decimal(unicode(medium))
