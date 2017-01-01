@@ -18,7 +18,7 @@ EARTH_ROTATION_SIDEREAL = 1
 ### Program defaults ###
 DEFAULT_TEMPERATURE = 8.0 #Celsius (as a float)
 DEFAULT_PRESSURE = 1010 #mBar (as int)
-DEFAULT_ELEVATION = 0 #Metres above sea level
+DEFAULT_ELEVATION = 15 #Metres above sea level
 
 ## Built-in celestial objects ###
 SOLAR_SYSTEM_OBJECTS = (

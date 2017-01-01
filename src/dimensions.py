@@ -106,12 +106,10 @@ class BaseDimension(object):
                 small = val_tup[2]
             except IndexError:
                 pass #These smaller entities are not mandatory!
-        elif isinstance(big, Angle): #It's a pyephem angle
-            big = rad_to_deg(big)
         #Setting to decimal
-        big = Decimal(unicode(big))
-        medium = Decimal(unicode(medium))
-        small = Decimal(unicode(small))
+        big = Decimal(big)
+        medium = Decimal(medium)
+        small = Decimal(small)
         degrees = big
         minutes = medium
         seconds = small
@@ -123,7 +121,7 @@ class BaseDimension(object):
             degrees, minutes, seconds = hms_to_dms(big, medium, small)
         elif mode == "hd": #Hours as decimal degrees:
             degrees = big * Decimal("15.0")
-        elif mode == "rad": #Radians
+        elif mode == "rad" or isinstance(big, Angle): #If we're running in radians, or it's a pyephem angle, assume Radians
             degrees = Decimal(math.degrees(big)) % Decimal("360")
         #Now we can set these as class objects
         self.degree = degrees

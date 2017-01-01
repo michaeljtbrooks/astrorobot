@@ -18,6 +18,8 @@ from dimensions import RightAscension, utc_now
 from coordinatepairs import ApparentRADec, LatLon
 from libraries import sidereal
 from situations import Observer, Target
+import time
+import settings
 
 
 class TestSingleCoordinates(unittest.TestCase):
@@ -84,13 +86,54 @@ def compare_pyephem_with_my_code():
 def give_it_a_spin():
     """
     Tests basic functionality of Astrorobot
+    
+    See: https://github.com/Stellarium/stellarium/blob/585dcacdf71372de845b81420e1b9d1b80369263/src/core/RefractionExtinction.cpp
+        for calculations on
+            Extinction = amount of light absorbed by atmosphere vs altitude (NB also causes redenning of objects as blue light absorbed more)
+            Refraction = bending of light by atmosphere vs altitude (more bending nearer horizon
+            
+    This is the refraction calculating code used by libastro (which ephem uses):
+        https://fossies.org/dox/xephem-3.7.7/refract_8c_source.html
     """
-    ob = Observer(location="London")
+    dt = datetime(2016,12,31,17,25,00)
+    ob = Observer(location="Bracknell,UK", timestamp=dt)
     s = Target(ob, "Betelgeuse")
-    print(s.ra)
-    print("RA: %s, Dec: %s" % (s.ra, s.dec))
-    print(unicode(s.ra_dec))
-
+    print("Betelgeuse:")
+    print("\tEphem a-RADec: %s, Dec: %s  (expected: 5:56:6 / 7:24:32)" % (s.a_ra, s.a_dec))
+    print("\tEphem RADec: %s, Dec: %s" % (s.ra, s.dec))
+    print("\tEphem AzAlt: Az: %s, Alt: %s" % (s.az, s.alt))
+    print("\tAstrorobot RADec apparent: %s" % unicode(s.ra_dec))
+    print("\tAstrorobot HADec apparent: %s  (expected: 18:08:28 / 7:30:10)" % unicode(s.ha_dec))
+    print("\tAstrorobot AzAlt apparent: %s  (expected: 86:56:56 / 7:10:32)" % unicode(s.az_alt))
+    #And now check directly
+    e_o = ephem.Observer()
+    e_o.lat = 51.410684
+    e_o.lon = -0.728876
+    e_o.elev = 50
+    e_o.horizon = 0
+    e_o.date = dt.strftime(settings.EPHEM_OBSERVER_DATE_FORMAT)
+    e_o.pressure = 0 #Set to zero
+    e_o.temp = 10.0
+    t = ephem.star("Betelgeuse")
+    t.compute(e_o)
+    print("Ephem pressure 0 AzAlt: %.12f, %.12f  |  RADec: %.12f, %.12f" % (t.az, t.alt, t.ra, t.dec))
+    e_o.pressure = 12000000.0
+    t.compute(e_o)
+    print("Ephem pressure 1200mBar AzAlt: %.12f, %.12f  |  RADec: %.12f, %.12f" % (t.az, t.alt, t.ra, t.dec))
+    e_o.compute_pressure()
+    print("ephem_observer pressure computed: %.12f" % e_o.pressure)
+    t.compute(e_o)
+    print("Ephem pressure computed AzAlt: %.12f, %.12f  |  RADec: %.12f, %.12f" % (t.az, t.alt, t.ra, t.dec))
+    print("--")
+    back_ra, back_dec = e_o.radec_of(t.az, t.alt)
+    print("Ephem AzAlt > RADec norm pressure: %s, %s  |  %.12f, %.12f" % (back_ra, back_dec, back_ra, back_dec))
+    e_o.pressure = 0
+    t.compute(e_o)
+    back_ra, back_dec = e_o.radec_of(t.az, t.alt)
+    print("Ephem AzAlt > RADec ZERO pressure: %s, %s  |  %.12f, %.12f" % (back_ra, back_dec, back_ra, back_dec))
+    
+    
+    
 
 if __name__ == "__main__":
     give_it_a_spin()

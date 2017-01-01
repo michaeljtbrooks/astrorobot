@@ -63,13 +63,22 @@ from __future__ import unicode_literals
 from copy import deepcopy
 from datetime import datetime, timedelta
 from dateutil import parser
-import ephem
+import ephem 
+import json
+from math import radians
 import pytz
+import sys
+_python3 = sys.version_info > (3,)
+if _python3:
+    from urllib.parse import urlencode
+    from urllib.request import urlopen
+else:
+    from urllib import urlencode
+    from urllib2 import urlopen
 #
 import settings
 from coordinatepairs import RADec, HADec, AzAlt, LatLon, BasePair, ApparentRADec
-from dimensions import BaseDimension, SmartLat, ApparentRightAscension,\
-    ApparentDeclination
+from dimensions import BaseDimension, SmartLat, ApparentRightAscension, ApparentDeclination
 from astrorobot_exceptions import InitError
 from utils import d, utc_now
 from libraries import sidereal
@@ -119,6 +128,8 @@ class TimetrackerMixin(object):
             time = now
         elif not isinstance(time, datetime): #Convert whatever has been supplied into a datetime
             time = parser.parse(unicode(time)) #Assume string
+        #Make aware and localise:
+        if time.tzinfo is None or time.tzinfo.utcoffset(d) is None:
             time = pytz.utc.localize(time)
         #Calculate offset
         self.time_travel_offset = time - now
@@ -176,7 +187,6 @@ class TimetrackerMixin(object):
         @return: <str> Representation of the datetime
         """
         out_date_str = self.now.strftime(settings.EPHEM_OBSERVER_DATE_FORMAT)
-        print(out_date_str)
         return out_date_str
     
     @property
@@ -192,33 +202,38 @@ class TargetSearchMixin(object):
     """
     Allows us to search for items in the Ephem library and return them
     """
-    def ephem_find(self, term):
+    def ephem_find(self, term, observer=None):
         """
         Searches for an exact ephem item and returns it
+        
+        @param term: The search term to use
+        @keyword observer: The observer to use, falls back to self.ephem_observer 
         
         @return: ephem object, or None if not found
         """
         ephem_target = None
         cap_item = unicode(term).capitalize() #Standardise
+        ephem_observer = observer.ephem_observer or self.ephem_observer
         
         #First see if the thing is a solar system object, these are direct properties:
         if cap_item in settings.SOLAR_SYSTEM_OBJECTS:
-            ephem_target = getattr(ephem, cap_item)() # Solar system objects are full classes on ephem
+            ephem_target = getattr(ephem, cap_item)(ephem_observer) # Solar system objects are full classes on ephem
         
         #See if it is a star:
         if not ephem_target:
             try:
-                ephem_target = ephem.star(cap_item, self.ephem_observer)
+                ephem_target = ephem.star(cap_item, ephem_observer)
             except KeyError:
                 ephem_target = None
         print("Target: %s" % ephem_target)
         return ephem_target
     #
-    def _get_ephem_target(self, item, *args, **kwargs):
+    def _get_ephem_target(self, item, observer=None, *args, **kwargs):
         """
         Takes a range of inputs and uses it to deduce an ephem_target 
         
         @param target: <Target>, <ephem.Body> or <unicode> - the target we are specifying
+        @keyword observer: The observer to use (will ultimately fall back to self.ephem_observer)
         
         @return: ephem.Body - some celestial object
         """
@@ -227,7 +242,7 @@ class TargetSearchMixin(object):
         elif isinstance(item, (ephem.Body, ephem.FixedBody, ephem.EarthSatellite, ephem.EllipticalBody, ephem.Planet, ephem.PlanetMoon, ephem.ParabolicBody)):
             ephem_target = item
         else: #A search term has been supplied, so search the ephem library for it 
-            ephem_target = self.ephem_find(item)        
+            ephem_target = self.ephem_find(item, observer)        
         if ephem_target:
             return ephem_target
         return None
@@ -259,10 +274,15 @@ class Observer(TimetrackerMixin, TargetSearchMixin):
             try:
                 city = ephem.city(location)
             except KeyError: #Location not found in ephem... search online??
-                pass
-            else:
-                print(dir(city))
-                self.location = LatLon(float(city.lat), float(city.lon), mode="rad") #Casts into decimal location
+                try:
+                    city = self.get_ephem_city(location)
+                    print("Found online: %s = %s,%s" % (location, city.lat, city.lon))
+                except ValueError:
+                    raise Exception("Sorry, we cannot find the location '%s' either in our database or online." % location) 
+            #Assuming we've found ourselves a little location
+            self.location = LatLon(float(city.lat), float(city.lon), mode="rad") #Casts into decimal location
+            if city.elevation:
+                elevation = d(city.elevation)
         
         if latitude is not None and longitude is not None:
             self.location = LatLon(latitude, longitude) #This will also cast any lat lon strings into proper numbers
@@ -337,7 +357,46 @@ class Observer(TimetrackerMixin, TargetSearchMixin):
         self.ephem_observer.pressure = self.pressure
         self.ephem_observer.elevation = self.elevation
         self.ephem_observer.date = self.now_ephem_str #Updates the time to the latest tracked value ###THE MOST IMPORTANT BIT!###
+        self.ephem_observer.epoch = self.now_ephem_str #Ensures we chase the sky as it looks on today's star atlas, not year 2000
         return self.ephem_observer
+    #
+    def get_ephem_city(self, address):
+        """
+        Given a string `address`, do a Google lookup and return an Ephem Observer.
+        
+        Patched version of ephem.cities.lookup()
+        
+        @param address: <str> A search string for a place
+        
+        @return Ephem-observer object with lat, lon, elevation all set
+        """
+        #First get the location's lat and long
+        parameters = urlencode({'address': address, 'sensor': 'false'})
+        url = 'http://maps.googleapis.com/maps/api/geocode/json?' + parameters
+        data = json.loads(urlopen(url).read().decode('utf-8'))
+        results = data['results']
+        if not results:
+            raise ValueError('Google cannot find a place named %r' % address)
+        address_components = results[0]['address_components']
+        location = results[0]['geometry']['location']
+        
+        #Now fetch the elevation:
+        parameters = urlencode({'locations': "%s,%s" % (location["lat"], location["lng"])})
+        url = 'http://maps.googleapis.com/maps/api/elevation/json?' + parameters
+        data = json.loads(urlopen(url).read().decode('utf-8'))
+        print(data)
+        elev_results = data['results']
+        elevation = settings.DEFAULT_ELEVATION
+        if elev_results:
+            elevation = elev_results[0]['elevation']
+        
+        #Create our ephem_observer
+        o = ephem.Observer()
+        o.name = ', '.join(c['long_name'] for c in address_components)
+        o.lat = radians(location['lat'])
+        o.lon = radians(location['lng'])
+        o.elevation = elevation
+        return o
     #
     def get_weather(self, timestamp=None):
         """
@@ -434,15 +493,14 @@ class Target(TargetSearchMixin):
     observer = None #Stores our observer
     ephem_observer = None #Stores our Ephem Observer object, allowing us to use common mixin
     
-    def __init__(self, observer=None, name=None, epoch=None, ra=None, dec=None, az=None, alt=None, ha=None, target_type="fixed"):
+    def __init__(self, observer=None, name=None, ra=None, dec=None, az=None, alt=None, ha=None, target_type="fixed"):
         """
-        Creates the relevant target either by lookup name or coordinates
+        TARGET: Creates the relevant target either by lookup name or coordinates
+        
+        @TODO: build in creating new object from coords
         
         REQUIRED:
         @param observer: <Observer> An observer (person on a place on the earth at a certain time)
-        
-        TO CHANGE THE OBSERVATION TIME:
-        @keyword epoch: <Datetime> The epoch to use for our star atlas grid. Will default to the observer's time.
         
         TO SPECIFY THE TARGET's POSITION
         @keyword name:  <unicode> The name of the item, which will be used to search the ephem database
@@ -464,7 +522,7 @@ class Target(TargetSearchMixin):
         
         print("Target init name: %s " % name)
         if name:
-            ephem_target = self.ephem_find(name)
+            ephem_target = self.ephem_find(name, observer)
             self.ephem_target = ephem_target
         
     def __getattr__(self, name, *args):
@@ -507,7 +565,7 @@ class Target(TargetSearchMixin):
         
         @return <AzAlt> of target
         """
-        return ApparentRADec(self.ephem_target.ra, self.ephem_target.dec, mode="rad")
+        return ApparentRADec(self.ra, self.dec, mode="rad")
     
     @property
     def hour_angle(self):
@@ -517,7 +575,7 @@ class Target(TargetSearchMixin):
         @return: <HourAngle> of target 
         """
         target_apparent_ra = ApparentRightAscension(self.ra, mode="rad")
-        return target_apparent_ra.to_hour_angle(self.observer.location.longitude(), self.observer.now)
+        return target_apparent_ra.to_hour_angle(self.observer.location.longitude, self.observer.now)
     @property
     def ha(self):
         return self.hour_angle
