@@ -97,6 +97,8 @@ def give_it_a_spin():
     """
     dt = datetime(2016,12,31,17,25,00)
     ob = Observer(location="Bracknell,UK", timestamp=dt)
+    ob.get_weather()
+    print(ob.get_twilight())
     s = Target(ob, "Betelgeuse")
     print("Betelgeuse:")
     print("\tEphem a-RADec: %s, Dec: %s  (expected: 5:56:6 / 7:24:32)" % (s.a_ra, s.a_dec))
@@ -131,8 +133,6 @@ def give_it_a_spin():
     t.compute(e_o)
     back_ra, back_dec = e_o.radec_of(t.az, t.alt)
     print("Ephem AzAlt > RADec ZERO pressure: %s, %s  |  %.12f, %.12f" % (back_ra, back_dec, back_ra, back_dec))
-    
-    
     
 
 if __name__ == "__main__":

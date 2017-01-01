@@ -60,3 +60,8 @@ SOLAR_SYSTEM_OBJECTS = (
 ## How our date is formatted
 EPHEM_OBSERVER_DATE_FORMAT = "%Y/%m/%d %H:%M:%S"
 EPHEM_DB_DATE_FORMAT = "%m/%d/%Y %H:%M:%S" #American dates are dumb. Day < month < year... got it? ffs.
+
+
+#API keys:
+KEY_OPEN_WEATHER_MAP = "7b2aaa099558f67a347a178337696d41"
+KEY_DARK_SKY = "1611a1fbe455fbed8ba2319280030e3a"

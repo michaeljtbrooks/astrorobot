@@ -68,6 +68,7 @@ import json
 from math import radians
 import pytz
 import sys
+from collections import OrderedDict
 _python3 = sys.version_info > (3,)
 if _python3:
     from urllib.parse import urlencode
@@ -80,7 +81,7 @@ import settings
 from coordinatepairs import RADec, HADec, AzAlt, LatLon, BasePair, ApparentRADec
 from dimensions import BaseDimension, SmartLat, ApparentRightAscension, ApparentDeclination
 from astrorobot_exceptions import InitError
-from utils import d, utc_now
+from utils import d, utc_now, rad_to_deg
 from libraries import sidereal
 
 
@@ -343,6 +344,22 @@ class Observer(TimetrackerMixin, TargetSearchMixin):
             return output
         return wrapper #This wrapper partial allows us to pass *args and **kwargs into a __getattr__ situation
     #
+    def __deepcopy__(self, memo):
+        """
+        Creates a new version of this Observer with fresh properties (prevents polluting it)
+        
+        @return: <Observer>
+        """
+        init_kwargs = OrderedDict() 
+        for init_prop in ("location","temperature","pressure","elevation"):
+            init_kwargs[init_prop] = deepcopy(getattr(self, init_prop), memo)
+        new_obj = self.__class__(**init_kwargs)
+            
+        for prop in ("time_travel_offset","frozen_time"):
+            new_obj_prop_val = deepcopy(getattr(self, prop), memo)
+            setattr(new_obj, prop, new_obj_prop_val)
+        return new_obj
+    #
     def updated_ephem_observer(self):
         """
         Gets our latest ephem observer after it has been updated with the latest model properties
@@ -353,9 +370,9 @@ class Observer(TimetrackerMixin, TargetSearchMixin):
             self.ephem_observer = ephem.Observer() #Always init with no args
         self.ephem_observer.lat = unicode(self.location.latitude.dd)  #Accepts as a string latitude only
         self.ephem_observer.lon = unicode(self.location.longitude.dd) #Accepts as a string longitude only
-        self.ephem_observer.temp = self.temperature
-        self.ephem_observer.pressure = self.pressure
-        self.ephem_observer.elevation = self.elevation
+        self.ephem_observer.temp = float(self.temperature)
+        self.ephem_observer.pressure = float(self.pressure)
+        self.ephem_observer.elevation = float(self.elevation)
         self.ephem_observer.date = self.now_ephem_str #Updates the time to the latest tracked value ###THE MOST IMPORTANT BIT!###
         self.ephem_observer.epoch = self.now_ephem_str #Ensures we chase the sky as it looks on today's star atlas, not year 2000
         return self.ephem_observer
@@ -400,8 +417,147 @@ class Observer(TimetrackerMixin, TargetSearchMixin):
     #
     def get_weather(self, timestamp=None):
         """
-        This fetches the weather for your location, at the given time (defaults to now).
-        Future dates will give a forecast. Past dates will give nearest actual observations. 
+        This fetches the current weather for your location.
+        
+        @TODO: Future dates will give a forecast. Past dates will give nearest actual observations. 
+        
+        Services available: 
+            
+            OpenWeatherMap: [Key = 7b2aaa099558f67a347a178337696d41] (see http://openweathermap.org/api)
+                Current weather:
+                    http://api.openweathermap.org/data/2.5/weather?q={city_name},{country_code}&APPID={key}
+                    -OR-
+                    http://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&APPID={key}
+                        {"coord":{"lon":139,"lat":35},
+                        "sys":{"country":"JP","sunrise":1369769524,"sunset":1369821049},
+                        "weather":[{"id":804,"main":"clouds","description":"overcast clouds","icon":"04n"}],
+                        "main":{"temp":289.5,"humidity":89,"pressure":1013,"temp_min":287.04,"temp_max":292.04},
+                        "wind":{"speed":7.31,"deg":187.002},
+                        "rain":{"3h":0},
+                        "clouds":{"all":92},
+                        "dt":1369824698,
+                        "id":1851632,
+                        "name":"Shuzenji",
+                        "cod":200}
+                
+                Historical weather (only available with Premium accounts!):
+                    http://history.openweathermap.org/data/2.5/history/city?q={city ID},{country code}&type=hour&start={start}&end={end} (times are unix timestamps)
+                        {"coord":{"lon":145.77,"lat":-16.92},
+                        "weather":[{"id":803,"main":"Clouds","description":"broken clouds","icon":"04n"}],
+                        "base":"cmc stations",
+                        "main":{"temp":293.25,"pressure":1019,"humidity":83,"temp_min":289.82,"temp_max":295.37},
+                        "wind":{"speed":5.1,"deg":150},
+                        "clouds":{"all":75},
+                        "rain":{"3h":3},
+                        "dt":1435658272,
+                        "sys":{"type":1,"id":8166,"message":0.0166,"country":"AU","sunrise":1435610796,"sunset":1435650870},
+                        "id":2172797,
+                        "name":"Cairns",
+                        "cod":200}
+                    
+            DarkSky API: [Key = 1611a1fbe455fbed8ba2319280030e3a] (see: https://darksky.net/dev/docs/time-machine)
+                https://api.darksky.net/forecast/{key}/{latitude},{longitude},{time}?units=uk2&exclude=minutely,hourly,daily  (times are unix timestamps or [YYYY]-[MM]-[DD]T[HH]:[MM]:[SS][timezone], units=uk2 means we'll get mBar and Celcius and distances in miles)
+                {
+                  "latitude": 42.3601,
+                  "longitude": -71.0589,
+                  "timezone": "America/New_York",
+                  "hourly": {
+                    "summary": "Snow (3–6 in.) and dangerously windy starting in the afternoon.",
+                    "icon": "snow",
+                    "data": [
+                      {
+                        "time": 255589200,
+                        "summary": "Mostly Cloudy",
+                        "icon": "partly-cloudy-night",
+                        "precipIntensity": 0,
+                        "precipProbability": 0,
+                        "temperature": 23.47,
+                        "apparentTemperature": 17.05,
+                        "dewPoint": 16.42,
+                        "humidity": 0.74,
+                        "windSpeed": 5,
+                        "windBearing": 350,
+                        "visibility": 9.6,
+                        "cloudCover": 0.78,
+                        "pressure": 1026.79
+                      },
+                      ...
+                    ]
+                  },
+                  "daily": {
+                    "data": [
+                      {
+                        "time": 255589200,
+                        "summary": "Mixed precipitation (3–6 in. of snow) and windy starting in the afternoon.",
+                        "icon": "snow",
+                        "sunriseTime": 255613996,
+                        "sunsetTime": 255650764,
+                        "moonPhase": 0.97,
+                        "precipIntensity": 0.0338,
+                        "precipIntensityMax": 0.17,
+                        "precipIntensityMaxTime": 255657600,
+                        "precipProbability": 0.87,
+                        "precipType": "snow",
+                        "precipAccumulation": 6.485,
+                        "temperatureMin": 23.33,
+                        "temperatureMinTime": 255600000,
+                        "temperatureMax": 34,
+                        "temperatureMaxTime": 255632400,
+                        "apparentTemperatureMin": 11.87,
+                        "apparentTemperatureMinTime": 255650400,
+                        "apparentTemperatureMax": 21.44,
+                        "apparentTemperatureMaxTime": 255632400,
+                        "dewPoint": 26.15,
+                        "humidity": 0.86,
+                        "windSpeed": 24.52,
+                        "windBearing": 57,
+                        "visibility": 4.69,
+                        "cloudCover": 0.96,
+                        "pressure": 1016.49
+                      }
+                    ]
+                  }
+                }
+            
+            Metcheck: (no key required) 
+                http://ws1.metcheck.com/ENGINE/v9_0/json.asp?lat=51.4&lon=-0.7
+                
+                {"metcheckData":
+                    { "forecastLocation":
+                        {"forecast":
+                            [
+                                {
+                                    "temperature": "5",     #Celcius
+                                    "dewpoint": "2",        #Celcius
+                                    "rain": "1.56",         #mm/hr
+                                    "freezinglevel": "683", #metres
+                                    "uvIndex": "0",
+                                    "totalcloud": "100",    #%
+                                    "lowcloud": "100",      
+                                    "medcloud": "100",
+                                    "highcloud": "100",
+                                    "humidity": "89",       #%
+                                    "windspeed": "99",      #mph ?buggy
+                                    "meansealevelpressure": "1017.57",  #mBar
+                                    "windgustspeed": "13",
+                                    "winddirection": "99",
+                                    "windletter": "E",
+                                    "icon": "RO",
+                                    "iconName": "Intermittent Rain",
+                                    "chanceofrain": "82",
+                                    "chanceofsnow": "0",
+                                    "dayOfWeek": "1",
+                                    "weekday": "Sunday",
+                                    "sunrise": "8:08",
+                                    "sunset": "16:02",
+                                    "dayOrNight": "N",
+                                    "utcTime": "2017-01-01T18:00:00.00" 
+                                }
+                            ]
+                        }
+                    }
+                }
+                
         
         @keyword timestamp: <datetime> The time you wish to explore. Defaults to self.now
         
@@ -416,7 +572,71 @@ class Observer(TimetrackerMixin, TargetSearchMixin):
         
         @TODO:
         """
-        pass
+        timestamp = timestamp or self.now #Ignored
+        timestamp = utc_now()
+        #Using OpenWeatherMap
+        print("Fetching current weather from OpenWeatherMap")
+        parameters = urlencode({'lat': self.location.latitude.dd, 'lon': self.location.longitude.dd, "APPID" : settings.KEY_OPEN_WEATHER_MAP})
+        url = "http://api.openweathermap.org/data/2.5/weather?" + parameters
+        data = json.loads(urlopen(url).read().decode('utf-8'))
+        
+        #Parse incoming data
+        temp_k = d(data["main"]["temp"]) #Temperature in kelvins
+        temp_c = temp_k - d("273.15") #Temperature in celcius
+        self.temperature = temp_c
+        self.pressure = d(data["main"]["pressure"]) #mBar
+        self.humidity = d(data["main"]["humidity"]) #%
+        self.cloud_cover = d(data["clouds"]["all"]) #%
+        self.wind_speed = d(data["wind"]["speed"]) #metres/sec
+        self.wind_speed_kph = (self.wind_speed * 60 * 60 / 1000)
+        self.wind_speed_mph = self.wind_speed_kph * d("0.621371")
+        self.weather_description = unicode(data["weather"][0]["description"]).lower()
+        self.updated_ephem_observer() #Now update the ephem observer with new weather conditions
+        
+        #Print report:
+        weather_report = """%(latlon)s @ %(timestamp)s:
+        %(darkness)s,
+        %(cloud).f%% cloud,
+        %(temp).1f°C,
+        %(humidity).f%% humidity
+        %(wind).f mph wind
+        %(description)s
+        """ % {
+            "latlon" : self.location,
+            "timestamp" : timestamp.strftime("%Y-%m-%d %H:%I UTC"),
+            "darkness" : self.get_twilight(timestamp)[1],
+            "cloud" : self.cloud_cover,
+            "temp" : self.temperature,
+            "humidity" : self.humidity,
+            "wind" : self.wind_speed_mph,
+            "description" : self.weather_description,
+        }
+        print(weather_report)
+        
+        #Generate warnings:
+        self.weather_warnings = []
+        if self.temperature < d("1"):
+            self.weather_warnings.append("Frost risk (%.1fC)" % self.temperature)
+        if self.cloud_cover > 45:
+            self.weather_warnings.append("Cloudy (%.f%% cover)" % self.cloud_cover)
+        if "rain" in self.weather_description or "drizzle" in self.weather_description or "sleet" in self.weather_description or "hail" in self.weather_description or "snow" in self.weather_description:
+            self.weather_warnings.append("Precipitation likely (%s)" % self.weather_description)
+        if self.humidity > 94:
+            condensate = "Dew"
+            if self.temperature < 1:
+                condensate = "Frost"
+            self.weather_warnings.append("%s on lenses likely (%.f%% humidity)" % (condensate, self.humidity))
+        if self.wind_speed_mph > 20: 
+            windiness = "Windy"
+            if self.wind_speed > 40:
+                windiness = "Very windy"
+            if self.wind_speed > 60:
+                windiness = "Gale force winds"
+            self.weather_warnings.append("%s (%.1fmph)" % (windiness, self.wind_speed))
+        
+        if self.weather_warnings:
+            print(self.weather_warnings)
+        
     #
     def _get_sidereal_time_obj(self, timestamp=None, longitude=None):
         """
@@ -463,7 +683,47 @@ class Observer(TimetrackerMixin, TargetSearchMixin):
     @property
     def sidereal_time(self):
         return self.get_sidereal_time()
-
+    #
+    def get_twilight(self, timestamp=None):
+        """
+        Determines which phase in day / twilight / night the observer is in.
+        
+            Civil dusk = centre of sun @ 6 degrees below horizon
+            Nautical dusk = centre of sun @ 12 degrees below horizon
+            Astronomical dusk = centre of sun @ 18 degrees below horizon
+        
+        @keyword timestamp: <datetime> The datetime to query. Defaults to now()
+        
+        @return: (<code, <description)
+            D = Day
+            CT = Civil twilight
+            NT = Nautical twilight
+            AT = Astronomical twilight
+            N = Night
+        """
+        if timestamp: #We need to re-init observer as we're using a different timestamp
+            sun_observer = deepcopy(self)
+            sun_observer.timetravel(timestamp)
+        else: #Can use existing observer, thus saving us deepcopying
+            sun_observer = self
+            timestamp = self.now
+        sun = Target(observer=sun_observer, name="Sun") #See where our sun is
+        sun_alt = rad_to_deg(sun.alt) #Get the altitude
+        try: #Retrieve the horizon
+            horizon = rad_to_deg(self.ephem_observer.horizon)
+        except AttributeError:
+            horizon = 0
+        
+        sun_alt_horiz = sun_alt - horizon #Adjust for high or low horizons
+        if sun_alt_horiz > 0:
+            return ("D","Day")
+        elif sun_alt_horiz > -6:
+            return ("CT","Civil Twilight")
+        elif sun_alt_horiz > -12:
+            return ("NT","Nautical Twilight")
+        elif sun_alt_horiz > -18:
+            return ("AT","Astronomical Twilight")
+        return ("N","Night")
 
 
 class Target(TargetSearchMixin):
@@ -534,8 +794,7 @@ class Target(TargetSearchMixin):
         
         @return: VARIOUS - Depending on the underlying function!
         """
-        self.ephem_observer = self.observer.updated_ephem_observer() #Update the latest time
-        self.ephem_target.compute(self.ephem_observer) #Updates this to the latest observer time
+        self.update_from_observer() #Re-compute everything
         output_attr = getattr(self.ephem_target, name)
         if callable(output_attr): #Proxy to a wrapper function if this is a callable
             def wrapper(*args, **kwargs):
@@ -545,6 +804,32 @@ class Target(TargetSearchMixin):
         else: #If not a function, just return the attr
             return output_attr
     
+    def __deepcopy__(self, memo):
+        """
+        Copies every property apart from the ephem ones. These are re-initialised
+        
+        @return: New Target() instance
+        """
+        init_kwargs = OrderedDict() 
+        for init_prop in ("observer","name"):
+            init_kwargs[init_prop] = deepcopy(getattr(self, init_prop), memo)
+        new_obj = self.__class__(**init_kwargs)
+            
+        #for prop in ("time_travel_offset","frozen_time"): #Doesn't apply
+        #    new_obj_prop_val = deepcopy(getattr(self, prop), memo)
+        #    setattr(new_obj, prop, new_obj_prop_val)
+        return new_obj
+    
+    def update_from_observer(self):
+        """
+        Updates the enbedded observer and calls compute() on the underlying object.
+        
+        @return: self (for chaining)
+        """
+        self.ephem_observer = self.observer.updated_ephem_observer() #Update the latest time
+        self.ephem_target.compute(self.ephem_observer) #Updates this to the latest observer time
+        return self
+    
     def position_at(self, timestamp):
         """
         Returns this target's expected position at the specified time
@@ -553,9 +838,10 @@ class Target(TargetSearchMixin):
         
         @return: <Target> updated to point to specified time
         """
-        new_target = deepcopy(self) #Make a copy so we don't pollute our original
-        new_target.observer.timetravel(timestamp) #This will be a new observer object too, yes things can get complicated if an observer moves!!
-        return new_target #Any properties called on that daughter object will 
+        new_target = deepcopy(self)
+        new_target.observer.timetravel(timestamp) #Timetravel to the new time
+        new_target.update_from_observer() #Re-computes everything
+        return new_target
     
     #--- Dimensions and CoordinatePairs ---
     @property
@@ -929,3 +1215,6 @@ class ObservingPositionHorizontal(BaseSituation):
     An observer using an AzAlt type mount
     """
     prime_subjective="az_alt"
+
+
+
