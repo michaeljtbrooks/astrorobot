@@ -47,6 +47,8 @@ import math
 #
 import pytz
 from ephem import Angle
+import requests
+from astrorobot_exceptions import DownloadingError
 
 
 ### Constants ###
@@ -183,3 +185,67 @@ def coord_rotate_rad(x, y, z):
 
     #-- 4 --
     return (xt, yt)
+
+
+class HttpFetcherMixin(object):
+    """
+    Retrieves data from external URLs. Leans on the superb Requests module
+    """
+    native_encoding = "utf8" #What comes out from the online service
+    _session = None #Where our session object is kept
+    timeout = (5,10) #5s for connect and 10s for read
+    headers = { #Default headers to supply for a request
+        "Content-Type": "application/json; charset=UTF-8",
+        "User-Agent": "Astrorobot / Python",
+    }
+    #
+    def _new_session(self):
+        """
+        Starts a new session
+        
+        @return: Requests.session
+        """
+        try:
+            self._session.close()
+        except (AttributeError,TypeError):
+            pass
+        self._session = requests.Session()
+        return self._session
+    #
+    @property
+    def session(self):
+        """
+        Retrieves the session object (generates a new one if there isn't one already) 
+        
+        @return: request.Session
+        """
+        if not self._session: #Create new session if none exists
+            return self._new_session()
+        return self._session
+    #
+    def __getattr__(self, name):
+        """
+        HTTP methods should be capable of raising exceptions where requests fail
+        
+        Proxies all remaining calls down to requests session.
+        """
+        def wrapper(*args, **kwargs):        
+            if name in ("get", "post", "put", "patch", "delete", "head", "options"): #These are HTTP methods
+                is_http_method = True
+            
+            #Now proxy down to the requests object (or session) 
+            try:
+                output = getattr(self.session, name)(*args, **kwargs) #Assume a function
+            except TypeError: #Assume a property
+                output = getattr(self.session, name)
+            
+            #Now catch any special HTTP calls 
+            if is_http_method:
+                #Examine the status, if in error, raise it
+                if output.status_code >= 400: #Some error has occurred!
+                    raise DownloadingError("Unable to download from resource: '%s'\n%s" % (output.url, output.content))
+            return output
+        return wrapper #This wrapper partial allows us to pass *args and **kwargs into a __getattr__ situation
+        
+        
+
